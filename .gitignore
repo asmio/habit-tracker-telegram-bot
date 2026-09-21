@@ -1,0 +1,27 @@
+# dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# environment (the example is committed)
+.env
+.env.*
+!.env.example
+
+# local databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# logs
+*.log
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code: project instructions and local settings stay out of the repo
+CLAUDE.md
+.claude/settings.local.json
