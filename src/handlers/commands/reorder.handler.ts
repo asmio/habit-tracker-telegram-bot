@@ -1,10 +1,10 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { logger } from '../logger';
-import { NotFoundError } from '../services/errors';
-import { trackerService } from '../services/tracker.service';
-import type { Tracker, TrackerItem } from '../db/schema';
-import { isMessageNotModified } from './telegram-errors';
-import { pickSingleOrPromptTracker } from './tracker-picker';
+import { logger } from '../../logger';
+import { NotFoundError } from '../../services/errors';
+import { trackerService } from '../../services/tracker.service';
+import type { Tracker, TrackerItem } from '../../db/schema';
+import { isMessageNotModified } from '../ui/telegram-errors';
+import { pickSingleOrPromptTracker } from '../ui/tracker-picker';
 
 const LABEL_CALLBACK_DATA = 'reorder-label';
 const DONE_CALLBACK_DATA = 'reorder-done';

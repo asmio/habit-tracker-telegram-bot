@@ -1,6 +1,6 @@
 import { Bot, type Context } from 'grammy';
-import { trackerService } from '../services/tracker.service';
-import { promptTimezone } from './timezone.handler';
+import { trackerService } from '../../services/tracker.service';
+import { promptTimezone } from '../commands/timezone.handler';
 
 const NOT_CONFIRMED_HINT =
   'Сначала выбери часовой пояс — от него зависит, когда для тебя начинается новый день. Потом повтори действие.';

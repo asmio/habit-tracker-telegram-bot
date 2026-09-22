@@ -1,6 +1,6 @@
 import { Bot } from 'grammy';
-import { todayDate, trackerService } from '../services/tracker.service';
-import { trackerKeyboard } from './toggle-button';
+import { todayDate, trackerService } from '../../services/tracker.service';
+import { trackerKeyboard } from '../ui/toggle-button';
 
 export function registerTodayHandler(bot: Bot): void {
   bot.command('today', async (ctx) => {

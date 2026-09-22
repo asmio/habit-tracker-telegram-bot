@@ -3,11 +3,11 @@ import {
   POPULAR_TIMEZONES,
   timezoneButtonLabel,
   timezoneFromLocation,
-} from '../services/timezone.service';
-import { isValidTimezone, trackerService } from '../services/tracker.service';
-import { MAIN_MENU_KEYBOARD } from './keyboard';
-import { getBotPromptText } from './prompt';
-import { isMessageNotModified } from './telegram-errors';
+} from '../../services/timezone.service';
+import { isValidTimezone, trackerService } from '../../services/tracker.service';
+import { MAIN_MENU_KEYBOARD } from '../ui/keyboard';
+import { getBotPromptText } from '../ui/prompt';
+import { isMessageNotModified } from '../ui/telegram-errors';
 
 const OTHER_PROMPT =
   'Пришли название часового пояса в формате Регион/Город, например Asia/Almaty. Ответь на это сообщение.';

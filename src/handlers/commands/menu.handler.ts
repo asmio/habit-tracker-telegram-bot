@@ -1,13 +1,13 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { todayDate, trackerService } from '../services/tracker.service';
+import { todayDate, trackerService } from '../../services/tracker.service';
+import { requireTimezone } from '../middleware/timezone-gate';
+import { trackerKeyboard } from '../ui/toggle-button';
 import { startAddItemFlow } from './additem.handler';
 import { startDeleteItemFlow } from './deleteitem.handler';
 import { startDeleteTrackerFlow } from './deletetracker.handler';
 import { startEditItemFlow } from './edititem.handler';
 import { startNewTrackerFlow } from './new.handler';
 import { startReorderFlow } from './reorder.handler';
-import { requireTimezone } from './timezone-gate';
-import { trackerKeyboard } from './toggle-button';
 
 const MANAGEMENT_TEXT = 'Что хочешь сделать?';
 

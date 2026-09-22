@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import type { DayLogItem } from '../services/tracker.service';
+import type { DayLogItem } from '../../services/tracker.service';
 
 const MARK_CHECKED = '☑';
 const MARK_UNCHECKED = '☐';

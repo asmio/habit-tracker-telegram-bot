@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Context } from 'grammy';
-import type { Tracker, TrackerItem } from '../db/schema';
-import { trackerService } from '../services/tracker.service';
+import type { Tracker, TrackerItem } from '../../db/schema';
+import { trackerService } from '../../services/tracker.service';
 import { editMessageTextSafely } from './telegram-errors';
 
 export const NO_TRACKERS_TEXT = 'Сначала создай трекер командой /new.';

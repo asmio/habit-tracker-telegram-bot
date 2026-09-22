@@ -1,10 +1,10 @@
 import { Bot, type Context } from 'grammy';
-import { logger } from '../logger';
-import { NotFoundError } from '../services/errors';
-import { trackerService } from '../services/tracker.service';
-import type { Tracker } from '../db/schema';
-import { editMessageTextSafely } from './telegram-errors';
-import { confirmKeyboard, editToTrackerList, hasMultipleTrackers, pickSingleOrPromptTracker } from './tracker-picker';
+import { logger } from '../../logger';
+import { NotFoundError } from '../../services/errors';
+import { trackerService } from '../../services/tracker.service';
+import type { Tracker } from '../../db/schema';
+import { editMessageTextSafely } from '../ui/telegram-errors';
+import { confirmKeyboard, editToTrackerList, hasMultipleTrackers, pickSingleOrPromptTracker } from '../ui/tracker-picker';
 
 const TRACKER_PROMPT = 'Какой трекер удалить?';
 

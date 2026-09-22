@@ -1,9 +1,9 @@
 import { Bot } from 'grammy';
-import { logger } from '../logger';
-import { NotFoundError } from '../services/errors';
-import { trackerService } from '../services/tracker.service';
-import { isMessageNotModified } from './telegram-errors';
-import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN, trackerKeyboard } from './toggle-button';
+import { logger } from '../../logger';
+import { NotFoundError } from '../../services/errors';
+import { trackerService } from '../../services/tracker.service';
+import { isMessageNotModified } from '../ui/telegram-errors';
+import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN, trackerKeyboard } from '../ui/toggle-button';
 
 export function registerCallbackHandler(bot: Bot): void {
   bot.callbackQuery(TOGGLE_CALLBACK_PATTERN, async (ctx) => {

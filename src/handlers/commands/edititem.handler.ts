@@ -1,11 +1,11 @@
 import { Bot, type Context } from 'grammy';
-import { logger } from '../logger';
-import { NotFoundError } from '../services/errors';
-import { trackerService } from '../services/tracker.service';
-import type { Tracker, TrackerItem } from '../db/schema';
-import { createPendingInput } from './pending-input';
-import { editMessageTextSafely } from './telegram-errors';
-import { editToTrackerList, hasMultipleTrackers, itemPickerKeyboard, pickSingleOrPromptTracker } from './tracker-picker';
+import { logger } from '../../logger';
+import { NotFoundError } from '../../services/errors';
+import { trackerService } from '../../services/tracker.service';
+import type { Tracker, TrackerItem } from '../../db/schema';
+import { createPendingInput } from '../middleware/pending-input';
+import { editMessageTextSafely } from '../ui/telegram-errors';
+import { editToTrackerList, hasMultipleTrackers, itemPickerKeyboard, pickSingleOrPromptTracker } from '../ui/tracker-picker';
 
 const MAX_LABEL_LENGTH = 64;
 const NO_KEYBOARD = { inline_keyboard: [] };

@@ -1,6 +1,6 @@
 import { Bot } from 'grammy';
-import { trackerService } from '../services/tracker.service';
-import { MAIN_MENU_KEYBOARD } from './keyboard';
+import { trackerService } from '../../services/tracker.service';
+import { MAIN_MENU_KEYBOARD } from '../ui/keyboard';
 import { promptTimezone } from './timezone.handler';
 
 export function registerStartHandler(bot: Bot): void {

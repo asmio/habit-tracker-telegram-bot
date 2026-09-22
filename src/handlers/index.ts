@@ -1,17 +1,17 @@
 import { Bot } from 'grammy';
-import { registerAddItemHandler } from './additem.handler';
-import { registerCallbackHandler } from './callback.handler';
-import { registerDeleteItemHandler } from './deleteitem.handler';
-import { registerDeleteTrackerHandler } from './deletetracker.handler';
-import { registerEditItemHandler } from './edititem.handler';
-import { registerMenuHandler } from './menu.handler';
-import { registerNewHandler } from './new.handler';
-import { registerPendingInputReset } from './pending-input';
-import { registerReorderHandler } from './reorder.handler';
-import { registerStartHandler } from './start.handler';
-import { registerTimezoneGate } from './timezone-gate';
-import { registerTimezoneHandler } from './timezone.handler';
-import { registerTodayHandler } from './today.handler';
+import { registerAddItemHandler } from './commands/additem.handler';
+import { registerCallbackHandler } from './commands/callback.handler';
+import { registerDeleteItemHandler } from './commands/deleteitem.handler';
+import { registerDeleteTrackerHandler } from './commands/deletetracker.handler';
+import { registerEditItemHandler } from './commands/edititem.handler';
+import { registerMenuHandler } from './commands/menu.handler';
+import { registerNewHandler } from './commands/new.handler';
+import { registerReorderHandler } from './commands/reorder.handler';
+import { registerStartHandler } from './commands/start.handler';
+import { registerTimezoneHandler } from './commands/timezone.handler';
+import { registerTodayHandler } from './commands/today.handler';
+import { registerPendingInputReset } from './middleware/pending-input';
+import { registerTimezoneGate } from './middleware/timezone-gate';
 
 export function registerHandlers(bot: Bot): void {
   // Clears any abandoned /additem or /edititem text-input state before anything else runs, so a
@@ -25,7 +25,7 @@ export function registerHandlers(bot: Bot): void {
   registerTimezoneGate(bot);
 
   // The main-menu keyboard's callback buttons (`menu:*`) go through the gate like any other
-  // button; its `bot.hears` aliases re-check the time zone themselves (see menu.handler.ts).
+  // button; its `bot.hears` aliases re-check the time zone themselves (see commands/menu.handler.ts).
   registerMenuHandler(bot);
 
   registerNewHandler(bot);

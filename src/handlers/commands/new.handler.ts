@@ -1,6 +1,6 @@
 import { Bot, type Context } from 'grammy';
-import { trackerService } from '../services/tracker.service';
-import { getBotPromptText } from './prompt';
+import { trackerService } from '../../services/tracker.service';
+import { getBotPromptText } from '../ui/prompt';
 
 const NAME_PROMPT = 'Как назвать новый трекер? Ответь на это сообщение.';
 const MAX_NAME_LENGTH = 64;
