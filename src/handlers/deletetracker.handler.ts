@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
@@ -19,17 +19,20 @@ function confirmScreen(tracker: Tracker, showBack: boolean) {
   };
 }
 
+/** Picks a tracker (or prompts to) and shows the confirm screen. Shared by /deletetracker and the menu. */
+export async function startDeleteTrackerFlow(ctx: Context): Promise<void> {
+  if (!ctx.from) return;
+
+  const user = await trackerService.getOrCreateUser(ctx.from.id);
+  const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deletetracker:confirm', TRACKER_PROMPT);
+  if (!tracker) return;
+
+  const screen = confirmScreen(tracker, false);
+  await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
+}
+
 export function registerDeleteTrackerHandler(bot: Bot): void {
-  bot.command('deletetracker', async (ctx) => {
-    if (!ctx.from) return;
-
-    const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deletetracker:confirm', TRACKER_PROMPT);
-    if (!tracker) return;
-
-    const screen = confirmScreen(tracker, false);
-    await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
-  });
+  bot.command('deletetracker', startDeleteTrackerFlow);
 
   bot.callbackQuery(/^deletetracker:confirm:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);

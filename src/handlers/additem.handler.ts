@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
@@ -23,22 +23,25 @@ function askText(trackerName: string): string {
   return `Введи название нового пункта для трекера «${trackerName}»:`;
 }
 
-export function registerAddItemHandler(bot: Bot): void {
-  bot.command('additem', async (ctx) => {
-    if (!ctx.from) return;
+/** Picks a tracker (or prompts to) and arms the pending text input. Shared by /additem and the menu. */
+export async function startAddItemFlow(ctx: Context): Promise<void> {
+  if (!ctx.from) return;
 
-    const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'additem:tracker', 'К какому трекеру добавить пункт?');
-    if (!tracker) return;
+  const user = await trackerService.getOrCreateUser(ctx.from.id);
+  const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'additem:tracker', 'К какому трекеру добавить пункт?');
+  if (!tracker) return;
 
-    const sent = await ctx.reply(askText(tracker.name), { reply_markup: NO_KEYBOARD });
-    pending.set(user.telegramId, {
-      trackerId: tracker.id,
-      trackerName: tracker.name,
-      chatId: sent.chat.id,
-      messageId: sent.message_id,
-    });
+  const sent = await ctx.reply(askText(tracker.name), { reply_markup: NO_KEYBOARD });
+  pending.set(user.telegramId, {
+    trackerId: tracker.id,
+    trackerName: tracker.name,
+    chatId: sent.chat.id,
+    messageId: sent.message_id,
   });
+}
+
+export function registerAddItemHandler(bot: Bot): void {
+  bot.command('additem', startAddItemFlow);
 
   bot.callbackQuery(/^additem:tracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);

@@ -35,19 +35,22 @@ async function sendReorderKeyboard(ctx: Context, telegramId: number, tracker: Tr
   });
 }
 
-export function registerReorderHandler(bot: Bot): void {
-  bot.command('reorder', async (ctx) => {
-    if (!ctx.from) return;
+/** Picks a tracker (or prompts to) and shows the reorder keyboard. Shared by /reorder and the menu. */
+export async function startReorderFlow(ctx: Context): Promise<void> {
+  if (!ctx.from) return;
 
-    const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(
-      ctx,
-      user.telegramId,
-      'reorder-pick',
-      'Пункты какого трекера отсортировать?',
-    );
-    if (tracker) await sendReorderKeyboard(ctx, user.telegramId, tracker);
-  });
+  const user = await trackerService.getOrCreateUser(ctx.from.id);
+  const tracker = await pickSingleOrPromptTracker(
+    ctx,
+    user.telegramId,
+    'reorder-pick',
+    'Пункты какого трекера отсортировать?',
+  );
+  if (tracker) await sendReorderKeyboard(ctx, user.telegramId, tracker);
+}
+
+export function registerReorderHandler(bot: Bot): void {
+  bot.command('reorder', startReorderFlow);
 
   bot.callbackQuery(/^reorder-pick:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);

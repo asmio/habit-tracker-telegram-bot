@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
@@ -36,17 +36,20 @@ async function itemsScreen(telegramId: number, tracker: Tracker, showBack: boole
   };
 }
 
+/** Picks a tracker (or prompts to) and shows its items. Shared by /edititem and the menu. */
+export async function startEditItemFlow(ctx: Context): Promise<void> {
+  if (!ctx.from) return;
+
+  const user = await trackerService.getOrCreateUser(ctx.from.id);
+  const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'edititem:tracker', TRACKER_PROMPT);
+  if (!tracker) return;
+
+  const screen = await itemsScreen(user.telegramId, tracker, false);
+  await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
+}
+
 export function registerEditItemHandler(bot: Bot): void {
-  bot.command('edititem', async (ctx) => {
-    if (!ctx.from) return;
-
-    const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'edititem:tracker', TRACKER_PROMPT);
-    if (!tracker) return;
-
-    const screen = await itemsScreen(user.telegramId, tracker, false);
-    await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
-  });
+  bot.command('edititem', startEditItemFlow);
 
   bot.callbackQuery(/^edititem:tracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);

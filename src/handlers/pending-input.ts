@@ -26,12 +26,14 @@ export function createPendingInput<T>() {
 }
 
 /**
- * Clears every pending free-text input for a user as soon as they start any command, so an
- * abandoned /additem or /edititem can never swallow a later, unrelated message. Register this
- * before the handlers that call `createPendingInput`, so the clear runs before a fresh one is set.
+ * Clears every pending free-text input for a user as soon as they start any command or press any
+ * button, so an abandoned /additem or /edititem (including ones started from the main menu, which
+ * enters these flows via a button rather than a command) can never swallow a later, unrelated
+ * message. Register this before the handlers that call `createPendingInput`, so a clear always
+ * runs before that same update might set a fresh entry.
  */
 export function registerPendingInputReset(bot: Bot): void {
-  bot.on('::bot_command', (ctx, next) => {
+  bot.on(['::bot_command', 'callback_query'], (ctx, next) => {
     if (ctx.from) {
       for (const clear of clearers) clear(ctx.from.id);
     }

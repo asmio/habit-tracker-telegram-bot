@@ -1,5 +1,6 @@
 import { Bot } from 'grammy';
 import { trackerService } from '../services/tracker.service';
+import { MAIN_MENU_KEYBOARD } from './keyboard';
 import { promptTimezone } from './timezone.handler';
 
 export function registerStartHandler(bot: Bot): void {
@@ -7,7 +8,7 @@ export function registerStartHandler(bot: Bot): void {
     if (!ctx.from) return;
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
-    await ctx.reply('Привет! Я помогу отслеживать твои привычки.');
+    await ctx.reply('Привет! Я помогу отслеживать твои привычки.', { reply_markup: MAIN_MENU_KEYBOARD });
 
     if (!user.timezoneConfirmed) {
       await promptTimezone(ctx);

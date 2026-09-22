@@ -4,6 +4,7 @@ import { registerCallbackHandler } from './callback.handler';
 import { registerDeleteItemHandler } from './deleteitem.handler';
 import { registerDeleteTrackerHandler } from './deletetracker.handler';
 import { registerEditItemHandler } from './edititem.handler';
+import { registerMenuHandler } from './menu.handler';
 import { registerNewHandler } from './new.handler';
 import { registerPendingInputReset } from './pending-input';
 import { registerReorderHandler } from './reorder.handler';
@@ -22,6 +23,10 @@ export function registerHandlers(bot: Bot): void {
   registerStartHandler(bot);
   registerTimezoneHandler(bot);
   registerTimezoneGate(bot);
+
+  // The main-menu keyboard's callback buttons (`menu:*`) go through the gate like any other
+  // button; its `bot.hears` aliases re-check the time zone themselves (see menu.handler.ts).
+  registerMenuHandler(bot);
 
   registerNewHandler(bot);
   registerAddItemHandler(bot);

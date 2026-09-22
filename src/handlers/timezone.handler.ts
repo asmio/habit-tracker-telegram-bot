@@ -5,6 +5,7 @@ import {
   timezoneFromLocation,
 } from '../services/timezone.service';
 import { isValidTimezone, trackerService } from '../services/tracker.service';
+import { MAIN_MENU_KEYBOARD } from './keyboard';
 import { getBotPromptText } from './prompt';
 import { isMessageNotModified } from './telegram-errors';
 
@@ -89,7 +90,7 @@ export function registerTimezoneHandler(bot: Bot): void {
       if (isMessageNotModified(error)) return;
       throw error;
     }
-    await ctx.reply(CONFIRMATION_HINT);
+    await ctx.reply(CONFIRMATION_HINT, { reply_markup: MAIN_MENU_KEYBOARD });
   });
 
   bot.callbackQuery('tz-other', async (ctx) => {
@@ -118,7 +119,7 @@ export function registerTimezoneHandler(bot: Bot): void {
     }
 
     await saveTimezone(ctx.from.id, timezone);
-    await ctx.reply(`Часовой пояс: ${timezone} ✅\n${CONFIRMATION_HINT}`);
+    await ctx.reply(`Часовой пояс: ${timezone} ✅\n${CONFIRMATION_HINT}`, { reply_markup: MAIN_MENU_KEYBOARD });
   });
 
   bot.on('message:location', async (ctx) => {
@@ -128,15 +129,16 @@ export function registerTimezoneHandler(bot: Bot): void {
     const { latitude, longitude } = ctx.msg.location;
     const timezone = timezoneFromLocation(latitude, longitude);
     if (!timezone) {
+      // The location-request keyboard is already gone the moment it was used; bring the
+      // persistent main menu back instead of leaving the user with no reply keyboard at all.
       await ctx.reply('Не получилось определить часовой пояс по геолокации. Выбери из списка: /timezone', {
-        reply_markup: { remove_keyboard: true },
+        reply_markup: MAIN_MENU_KEYBOARD,
       });
       return;
     }
 
     await saveTimezone(ctx.from.id, timezone);
-    await ctx.reply(`Часовой пояс: ${timezone} ✅\n${CONFIRMATION_HINT}`, {
-      reply_markup: { remove_keyboard: true },
-    });
+    // Replaces the location-request keyboard with the persistent main menu in the same edit.
+    await ctx.reply(`Часовой пояс: ${timezone} ✅\n${CONFIRMATION_HINT}`, { reply_markup: MAIN_MENU_KEYBOARD });
   });
 }

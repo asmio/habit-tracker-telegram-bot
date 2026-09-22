@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
@@ -31,17 +31,20 @@ function confirmScreen(item: TrackerItem, trackerId: number) {
   };
 }
 
+/** Picks a tracker (or prompts to) and shows its items. Shared by /deleteitem and the menu. */
+export async function startDeleteItemFlow(ctx: Context): Promise<void> {
+  if (!ctx.from) return;
+
+  const user = await trackerService.getOrCreateUser(ctx.from.id);
+  const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deleteitem:tracker', TRACKER_PROMPT);
+  if (!tracker) return;
+
+  const screen = await itemsScreen(user.telegramId, tracker, false);
+  await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
+}
+
 export function registerDeleteItemHandler(bot: Bot): void {
-  bot.command('deleteitem', async (ctx) => {
-    if (!ctx.from) return;
-
-    const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deleteitem:tracker', TRACKER_PROMPT);
-    if (!tracker) return;
-
-    const screen = await itemsScreen(user.telegramId, tracker, false);
-    await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
-  });
+  bot.command('deleteitem', startDeleteItemFlow);
 
   bot.callbackQuery(/^deleteitem:tracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
