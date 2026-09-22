@@ -1,9 +1,10 @@
-import { Bot, InlineKeyboard, type Context } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
 import type { Tracker } from '../db/schema';
 import { getBotPromptText } from './prompt';
+import { pickSingleOrPromptTracker } from './tracker-picker';
 
 const PROMPT_PREFIX = 'Пришли пункты для трекера';
 // The prompt ends with the tracker id, so the reply can be tied to it without any stored state.
@@ -24,21 +25,8 @@ export function registerAddItemHandler(bot: Bot): void {
     if (!ctx.from) return;
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const trackers = await trackerService.getTrackers(user.telegramId);
-    if (trackers.length === 0) {
-      await ctx.reply('Сначала создай трекер командой /new.');
-      return;
-    }
-    if (trackers.length === 1) {
-      await promptForItems(ctx, trackers[0]);
-      return;
-    }
-
-    await ctx.reply('К какому трекеру добавить пункты?', {
-      reply_markup: InlineKeyboard.from(
-        trackers.map((tracker) => [InlineKeyboard.text(tracker.name, `additem:${tracker.id}`)]),
-      ),
-    });
+    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'additem', 'К какому трекеру добавить пункты?');
+    if (tracker) await promptForItems(ctx, tracker);
   });
 
   bot.callbackQuery(/^additem:(\d+)$/, async (ctx) => {

@@ -1,4 +1,4 @@
-import { and, asc, eq, getTableColumns, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gt, lt, sql } from 'drizzle-orm';
 import { db, type Db } from '../db';
 import {
   dailyLogs,
@@ -123,6 +123,100 @@ export class TrackerService {
     return item;
   }
 
+  /** Ownership-checked lookup of a single item. */
+  async getItem(telegramId: number, itemId: number): Promise<TrackerItem> {
+    const [item] = await this.db
+      .select(getTableColumns(trackerItems))
+      .from(trackerItems)
+      .innerJoin(trackers, eq(trackers.id, trackerItems.trackerId))
+      .where(and(eq(trackerItems.id, itemId), eq(trackers.telegramId, telegramId)));
+    if (!item) {
+      throw new NotFoundError(`Item ${itemId} not found`);
+    }
+    return item;
+  }
+
+  /** Items of the tracker, in order, without any daily_logs state. */
+  async getItems(telegramId: number, trackerId: number): Promise<TrackerItem[]> {
+    await this.getTracker(telegramId, trackerId);
+    return await this.db
+      .select()
+      .from(trackerItems)
+      .where(eq(trackerItems.trackerId, trackerId))
+      .orderBy(asc(trackerItems.order), asc(trackerItems.id));
+  }
+
+  async updateItemLabel(telegramId: number, itemId: number, label: string): Promise<TrackerItem> {
+    await this.getItem(telegramId, itemId);
+    const [item] = await this.db
+      .update(trackerItems)
+      .set({ label })
+      .where(eq(trackerItems.id, itemId))
+      .returning();
+    return item;
+  }
+
+  /** Deletes the item; `ON DELETE CASCADE` takes its daily_logs rows with it. Returns the item as it was. */
+  async deleteItem(telegramId: number, itemId: number): Promise<TrackerItem> {
+    const item = await this.getItem(telegramId, itemId);
+    await this.db.delete(trackerItems).where(eq(trackerItems.id, itemId));
+    return item;
+  }
+
+  /**
+   * Deletes the tracker; `ON DELETE CASCADE` takes its items and their daily_logs with it.
+   * Returns the tracker as it was.
+   */
+  async deleteTracker(telegramId: number, trackerId: number): Promise<Tracker> {
+    const tracker = await this.getTracker(telegramId, trackerId);
+    await this.db.delete(trackers).where(eq(trackers.id, trackerId));
+    return tracker;
+  }
+
+  /**
+   * Swaps the item's position with its neighbour in that direction. A no-op (not an error) at
+   * either end of the list, so a stale ⬆️/⬇️ tap on an edge item does nothing instead of failing.
+   * Runs as a single transaction: better-sqlite3 executes it fully synchronously, so the read of
+   * the neighbour's position can never go stale between reading it and swapping the two rows.
+   */
+  async moveItem(telegramId: number, itemId: number, direction: 'up' | 'down'): Promise<{ trackerId: number }> {
+    return this.db.transaction((tx) => {
+      const current = tx
+        .select({ id: trackerItems.id, trackerId: trackerItems.trackerId, order: trackerItems.order })
+        .from(trackerItems)
+        .innerJoin(trackers, eq(trackers.id, trackerItems.trackerId))
+        .where(and(eq(trackerItems.id, itemId), eq(trackers.telegramId, telegramId)))
+        .get();
+      if (!current) {
+        throw new NotFoundError(`Item ${itemId} not found`);
+      }
+
+      const neighbor =
+        direction === 'up'
+          ? tx
+              .select({ id: trackerItems.id, order: trackerItems.order })
+              .from(trackerItems)
+              .where(and(eq(trackerItems.trackerId, current.trackerId), lt(trackerItems.order, current.order)))
+              .orderBy(desc(trackerItems.order))
+              .limit(1)
+              .get()
+          : tx
+              .select({ id: trackerItems.id, order: trackerItems.order })
+              .from(trackerItems)
+              .where(and(eq(trackerItems.trackerId, current.trackerId), gt(trackerItems.order, current.order)))
+              .orderBy(asc(trackerItems.order))
+              .limit(1)
+              .get();
+
+      if (neighbor) {
+        tx.update(trackerItems).set({ order: neighbor.order }).where(eq(trackerItems.id, current.id)).run();
+        tx.update(trackerItems).set({ order: current.order }).where(eq(trackerItems.id, neighbor.id)).run();
+      }
+
+      return { trackerId: current.trackerId };
+    });
+  }
+
   /** Items of the tracker with their `checked` state for today in the owner's time zone. */
   async getTodayLog(trackerId: number): Promise<DayLogItem[]> {
     const [owner] = await this.db
@@ -153,15 +247,7 @@ export class TrackerService {
     checked: boolean,
   ): Promise<{ trackerId: number }> {
     assertDate(date);
-
-    const [item] = await this.db
-      .select({ trackerId: trackerItems.trackerId })
-      .from(trackerItems)
-      .innerJoin(trackers, eq(trackers.id, trackerItems.trackerId))
-      .where(and(eq(trackerItems.id, itemId), eq(trackers.telegramId, telegramId)));
-    if (!item) {
-      throw new NotFoundError(`Item ${itemId} not found`);
-    }
+    const item = await this.getItem(telegramId, itemId);
 
     await this.db
       .insert(dailyLogs)

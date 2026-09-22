@@ -1,7 +1,11 @@
 import { Bot } from 'grammy';
 import { registerAddItemHandler } from './additem.handler';
 import { registerCallbackHandler } from './callback.handler';
+import { registerDeleteItemHandler } from './deleteitem.handler';
+import { registerDeleteTrackerHandler } from './deletetracker.handler';
+import { registerEditItemHandler } from './edititem.handler';
 import { registerNewHandler } from './new.handler';
+import { registerReorderHandler } from './reorder.handler';
 import { registerStartHandler } from './start.handler';
 import { registerTimezoneGate } from './timezone-gate';
 import { registerTimezoneHandler } from './timezone.handler';
@@ -18,4 +22,8 @@ export function registerHandlers(bot: Bot): void {
   registerAddItemHandler(bot);
   registerTodayHandler(bot);
   registerCallbackHandler(bot);
+  registerEditItemHandler(bot);
+  registerDeleteItemHandler(bot);
+  registerDeleteTrackerHandler(bot);
+  registerReorderHandler(bot);
 }
