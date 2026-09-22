@@ -8,11 +8,8 @@ dist/
 .env.*
 !.env.example
 
-# local databases
-*.db
-*.db-shm
-*.db-wal
-*.db-journal
+# local database
+data/
 
 # logs
 *.log
