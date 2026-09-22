@@ -1,32 +1,39 @@
-import { Bot, type Context } from 'grammy';
+import { Bot } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
 import type { Tracker, TrackerItem } from '../db/schema';
-import { getBotPromptText } from './prompt';
-import { itemPickerKeyboard, pickSingleOrPromptTracker } from './tracker-picker';
+import { createPendingInput } from './pending-input';
+import { editMessageTextSafely } from './telegram-errors';
+import { editToTrackerList, hasMultipleTrackers, itemPickerKeyboard, pickSingleOrPromptTracker } from './tracker-picker';
 
-const PROMPT_PREFIX = 'Новое название для';
-// The prompt ends with the item id, so the reply can be tied to it without any stored state.
-// The id is only a hint: `updateItemLabel` re-checks that the item belongs to the sender.
-const PROMPT_ITEM_ID = /\(пункт №(\d+)\)$/;
 const MAX_LABEL_LENGTH = 64;
+const NO_KEYBOARD = { inline_keyboard: [] };
+const TRACKER_PROMPT = 'Пункт какого трекера переименовать?';
 
-async function promptItemPicker(ctx: Context, tracker: Tracker): Promise<void> {
-  const items = await trackerService.getItems(tracker.telegramId, tracker.id);
-  if (items.length === 0) {
-    await ctx.reply(`В трекере «${tracker.name}» нет пунктов. Добавь их: /additem.`);
-    return;
-  }
-  await ctx.reply(`Какой пункт трекера «${tracker.name}» переименовать?`, {
-    reply_markup: itemPickerKeyboard(items, 'edititem-item'),
-  });
+interface PendingEditItem {
+  itemId: number;
+  currentLabel: string;
+  chatId: number;
+  messageId: number;
 }
 
-async function promptNewLabel(ctx: Context, item: TrackerItem): Promise<void> {
-  await ctx.reply(`${PROMPT_PREFIX} «${item.label}»? Ответь на это сообщение. (пункт №${item.id})`, {
-    reply_markup: { force_reply: true, input_field_placeholder: 'Новое название' },
-  });
+const pending = createPendingInput<PendingEditItem>();
+
+function askText(currentLabel: string): string {
+  return `Введи новое название для «${currentLabel}»:`;
+}
+
+async function itemsScreen(telegramId: number, tracker: Tracker, showBack: boolean) {
+  const items = await trackerService.getItems(telegramId, tracker.id);
+  const text =
+    items.length === 0
+      ? `В трекере «${tracker.name}» нет пунктов. Добавь их: /additem.`
+      : `Какой пункт трекера «${tracker.name}» переименовать?`;
+  return {
+    text,
+    reply_markup: itemPickerKeyboard(items, 'edititem:name', showBack ? 'edititem:trackers' : undefined),
+  };
 }
 
 export function registerEditItemHandler(bot: Bot): void {
@@ -34,16 +41,14 @@ export function registerEditItemHandler(bot: Bot): void {
     if (!ctx.from) return;
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(
-      ctx,
-      user.telegramId,
-      'edititem',
-      'Пункт какого трекера переименовать?',
-    );
-    if (tracker) await promptItemPicker(ctx, tracker);
+    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'edititem:tracker', TRACKER_PROMPT);
+    if (!tracker) return;
+
+    const screen = await itemsScreen(user.telegramId, tracker, false);
+    await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
   });
 
-  bot.callbackQuery(/^edititem:(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^edititem:tracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
 
     let tracker: Tracker;
@@ -57,10 +62,16 @@ export function registerEditItemHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    await promptItemPicker(ctx, tracker);
+    const screen = await itemsScreen(ctx.from.id, tracker, await hasMultipleTrackers(ctx.from.id));
+    await editMessageTextSafely(ctx, screen.text, { reply_markup: screen.reply_markup });
   });
 
-  bot.callbackQuery(/^edititem-item:(\d+)$/, async (ctx) => {
+  bot.callbackQuery('edititem:trackers', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await editToTrackerList(ctx, ctx.from.id, TRACKER_PROMPT, 'edititem:tracker');
+  });
+
+  bot.callbackQuery(/^edititem:name:(\d+)$/, async (ctx) => {
     const itemId = Number(ctx.match[1]);
 
     let item: TrackerItem;
@@ -74,33 +85,52 @@ export function registerEditItemHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    await promptNewLabel(ctx, item);
+    const message = ctx.callbackQuery.message;
+    if (!message) {
+      await ctx.reply('Сообщение устарело. Открой /edititem заново.');
+      return;
+    }
+
+    await editMessageTextSafely(ctx, askText(item.label), { reply_markup: NO_KEYBOARD });
+    pending.set(ctx.from.id, {
+      itemId: item.id,
+      currentLabel: item.label,
+      chatId: message.chat.id,
+      messageId: message.message_id,
+    });
   });
 
   bot.on('message:text', async (ctx, next) => {
-    const prompt = getBotPromptText(ctx);
-    const itemId = prompt?.startsWith(PROMPT_PREFIX) ? PROMPT_ITEM_ID.exec(prompt)?.[1] : undefined;
-    if (!ctx.from || itemId === undefined) return next();
+    if (!ctx.from) return next();
+    const state = pending.consume(ctx.from.id);
+    if (!state) return next();
 
     const label = ctx.msg.text.trim();
-    if (label.length === 0) {
-      await ctx.reply('Название не может быть пустым. Попробуй ещё раз.');
-      return;
-    }
-    if (label.length > MAX_LABEL_LENGTH) {
-      await ctx.reply(`Слишком длинное название (максимум ${MAX_LABEL_LENGTH} символов). Попробуй ещё раз.`);
+    if (label.length === 0 || label.length > MAX_LABEL_LENGTH) {
+      const reason =
+        label.length === 0
+          ? 'Название не может быть пустым.'
+          : `Слишком длинное название (максимум ${MAX_LABEL_LENGTH} символов).`;
+      pending.set(ctx.from.id, state); // keep waiting: let the user retry on the same message
+      await ctx.api.editMessageText(state.chatId, state.messageId, `⚠️ ${reason}\n\n${askText(state.currentLabel)}`, {
+        reply_markup: NO_KEYBOARD,
+      });
       return;
     }
 
-    let item: TrackerItem;
     try {
-      item = await trackerService.updateItemLabel(ctx.from.id, Number(itemId), label);
+      const item = await trackerService.updateItemLabel(ctx.from.id, state.itemId, label);
+      await ctx.api.editMessageText(state.chatId, state.messageId, `✅ Пункт переименован: «${item.label}».`, {
+        reply_markup: NO_KEYBOARD,
+      });
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
-      await ctx.reply('Пункт не найден. Отправь /edititem и попробуй заново.');
-      return;
+      await ctx.api.editMessageText(
+        state.chatId,
+        state.messageId,
+        'Пункт не найден. Отправь /edititem и попробуй заново.',
+        { reply_markup: NO_KEYBOARD },
+      );
     }
-
-    await ctx.reply(`Пункт переименован в «${item.label}» ✅`);
   });
 }

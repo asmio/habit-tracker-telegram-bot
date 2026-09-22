@@ -1,23 +1,26 @@
-import { Bot, type Context } from 'grammy';
+import { Bot } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
 import type { Tracker } from '../db/schema';
-import { getBotPromptText } from './prompt';
+import { createPendingInput } from './pending-input';
+import { editMessageTextSafely } from './telegram-errors';
 import { pickSingleOrPromptTracker } from './tracker-picker';
 
-const PROMPT_PREFIX = 'Пришли пункты для трекера';
-// The prompt ends with the tracker id, so the reply can be tied to it without any stored state.
-// The id is only a hint: `createItem` re-checks that the tracker belongs to the sender.
-const PROMPT_TRACKER_ID = /\(трекер №(\d+)\)$/;
-const MAX_ITEMS_PER_MESSAGE = 20;
 const MAX_LABEL_LENGTH = 64;
+const NO_KEYBOARD = { inline_keyboard: [] };
 
-async function promptForItems(ctx: Context, tracker: Tracker): Promise<void> {
-  await ctx.reply(
-    `${PROMPT_PREFIX} «${tracker.name}» — по одному на строку. Ответь на это сообщение. (трекер №${tracker.id})`,
-    { reply_markup: { force_reply: true, input_field_placeholder: 'Каждый пункт с новой строки' } },
-  );
+interface PendingAddItem {
+  trackerId: number;
+  trackerName: string;
+  chatId: number;
+  messageId: number;
+}
+
+const pending = createPendingInput<PendingAddItem>();
+
+function askText(trackerName: string): string {
+  return `Введи название нового пункта для трекера «${trackerName}»:`;
 }
 
 export function registerAddItemHandler(bot: Bot): void {
@@ -25,11 +28,19 @@ export function registerAddItemHandler(bot: Bot): void {
     if (!ctx.from) return;
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'additem', 'К какому трекеру добавить пункты?');
-    if (tracker) await promptForItems(ctx, tracker);
+    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'additem:tracker', 'К какому трекеру добавить пункт?');
+    if (!tracker) return;
+
+    const sent = await ctx.reply(askText(tracker.name), { reply_markup: NO_KEYBOARD });
+    pending.set(user.telegramId, {
+      trackerId: tracker.id,
+      trackerName: tracker.name,
+      chatId: sent.chat.id,
+      messageId: sent.message_id,
+    });
   });
 
-  bot.callbackQuery(/^additem:(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^additem:tracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
 
     let tracker: Tracker;
@@ -43,37 +54,55 @@ export function registerAddItemHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    await promptForItems(ctx, tracker);
+    const message = ctx.callbackQuery.message;
+    if (!message) {
+      await ctx.reply('Сообщение устарело. Открой /additem заново.');
+      return;
+    }
+
+    await editMessageTextSafely(ctx, askText(tracker.name), { reply_markup: NO_KEYBOARD });
+    pending.set(ctx.from.id, {
+      trackerId: tracker.id,
+      trackerName: tracker.name,
+      chatId: message.chat.id,
+      messageId: message.message_id,
+    });
   });
 
   bot.on('message:text', async (ctx, next) => {
-    const prompt = getBotPromptText(ctx);
-    const trackerId = prompt?.startsWith(PROMPT_PREFIX) ? PROMPT_TRACKER_ID.exec(prompt)?.[1] : undefined;
-    if (!ctx.from || trackerId === undefined) return next();
+    if (!ctx.from) return next();
+    const state = pending.consume(ctx.from.id);
+    if (!state) return next();
 
-    const labels = ctx.msg.text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    if (labels.length > MAX_ITEMS_PER_MESSAGE) {
-      await ctx.reply(`Слишком много пунктов за раз (максимум ${MAX_ITEMS_PER_MESSAGE}). Отправь /additem и попробуй ещё раз.`);
-      return;
-    }
-    if (labels.some((label) => label.length > MAX_LABEL_LENGTH)) {
-      await ctx.reply(`Слишком длинный пункт (максимум ${MAX_LABEL_LENGTH} символов). Отправь /additem и попробуй ещё раз.`);
+    const label = ctx.msg.text.trim();
+    if (label.length === 0 || label.length > MAX_LABEL_LENGTH) {
+      const reason =
+        label.length === 0
+          ? 'Название не может быть пустым.'
+          : `Слишком длинное название (максимум ${MAX_LABEL_LENGTH} символов).`;
+      pending.set(ctx.from.id, state); // keep waiting: let the user retry on the same message
+      await ctx.api.editMessageText(state.chatId, state.messageId, `⚠️ ${reason}\n\n${askText(state.trackerName)}`, {
+        reply_markup: NO_KEYBOARD,
+      });
       return;
     }
 
     try {
-      for (const label of labels) {
-        await trackerService.createItem(ctx.from.id, Number(trackerId), label);
-      }
+      const item = await trackerService.createItem(ctx.from.id, state.trackerId, label);
+      await ctx.api.editMessageText(
+        state.chatId,
+        state.messageId,
+        `✅ Пункт «${item.label}» добавлен в «${state.trackerName}».`,
+        { reply_markup: NO_KEYBOARD },
+      );
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
-      await ctx.reply('Трекер не найден. Отправь /additem и выбери трекер заново.');
-      return;
+      await ctx.api.editMessageText(
+        state.chatId,
+        state.messageId,
+        'Трекер не найден. Отправь /additem и попробуй заново.',
+        { reply_markup: NO_KEYBOARD },
+      );
     }
-
-    await ctx.reply(`Добавлено пунктов: ${labels.length}. Посмотреть: /today`);
   });
 }

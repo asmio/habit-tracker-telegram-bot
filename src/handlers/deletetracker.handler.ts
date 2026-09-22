@@ -1,22 +1,22 @@
-import { Bot, InlineKeyboard, type Context } from 'grammy';
+import { Bot } from 'grammy';
 import { logger } from '../logger';
 import { NotFoundError } from '../services/errors';
 import { trackerService } from '../services/tracker.service';
 import type { Tracker } from '../db/schema';
-import { isMessageNotModified } from './telegram-errors';
-import { pickSingleOrPromptTracker } from './tracker-picker';
+import { editMessageTextSafely } from './telegram-errors';
+import { confirmKeyboard, editToTrackerList, hasMultipleTrackers, pickSingleOrPromptTracker } from './tracker-picker';
 
-function confirmKeyboard(trackerId: number): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('🗑 Да, удалить', `deletetracker-confirm:${trackerId}`)
-    .text('Отмена', 'deletetracker-cancel');
-}
+const TRACKER_PROMPT = 'Какой трекер удалить?';
 
-async function promptConfirm(ctx: Context, tracker: Tracker): Promise<void> {
-  await ctx.reply(
-    `Удалить трекер «${tracker.name}» вместе со всеми пунктами и историей отметок? Это нельзя отменить.`,
-    { reply_markup: confirmKeyboard(tracker.id) },
-  );
+function confirmScreen(tracker: Tracker, showBack: boolean) {
+  return {
+    text: `Удалить «${tracker.name}» вместе со всеми пунктами и историей?`,
+    reply_markup: confirmKeyboard(
+      '🗑 Да, удалить',
+      `deletetracker:done:${tracker.id}`,
+      showBack ? 'deletetracker:trackers' : undefined,
+    ),
+  };
 }
 
 export function registerDeleteTrackerHandler(bot: Bot): void {
@@ -24,11 +24,14 @@ export function registerDeleteTrackerHandler(bot: Bot): void {
     if (!ctx.from) return;
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
-    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deletetracker', 'Какой трекер удалить?');
-    if (tracker) await promptConfirm(ctx, tracker);
+    const tracker = await pickSingleOrPromptTracker(ctx, user.telegramId, 'deletetracker:confirm', TRACKER_PROMPT);
+    if (!tracker) return;
+
+    const screen = confirmScreen(tracker, false);
+    await ctx.reply(screen.text, { reply_markup: screen.reply_markup });
   });
 
-  bot.callbackQuery(/^deletetracker:(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^deletetracker:confirm:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
 
     let tracker: Tracker;
@@ -45,10 +48,16 @@ export function registerDeleteTrackerHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    await promptConfirm(ctx, tracker);
+    const screen = confirmScreen(tracker, await hasMultipleTrackers(ctx.from.id));
+    await editMessageTextSafely(ctx, screen.text, { reply_markup: screen.reply_markup });
   });
 
-  bot.callbackQuery(/^deletetracker-confirm:(\d+)$/, async (ctx) => {
+  bot.callbackQuery('deletetracker:trackers', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await editToTrackerList(ctx, ctx.from.id, TRACKER_PROMPT, 'deletetracker:confirm');
+  });
+
+  bot.callbackQuery(/^deletetracker:done:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
 
     let tracker: Tracker;
@@ -65,15 +74,6 @@ export function registerDeleteTrackerHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(`Трекер «${tracker.name}» удалён.`, { reply_markup: { inline_keyboard: [] } });
-  });
-
-  bot.callbackQuery('deletetracker-cancel', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    try {
-      await ctx.editMessageText('Отменено.', { reply_markup: { inline_keyboard: [] } });
-    } catch (error) {
-      if (!isMessageNotModified(error)) throw error;
-    }
+    await ctx.editMessageText(`✅ Трекер «${tracker.name}» удалён.`, { reply_markup: { inline_keyboard: [] } });
   });
 }
