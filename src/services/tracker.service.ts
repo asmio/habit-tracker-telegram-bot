@@ -13,7 +13,7 @@ import { NotFoundError } from './errors';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-export type DayLogItem = TrackerItem & { checked: boolean };
+type DayLogItem = TrackerItem & { checked: boolean };
 
 /**
  * True for IANA zone names such as `Europe/Minsk`. UTC offsets like `+03:00` are
@@ -156,6 +156,12 @@ export class TrackerService {
     return item;
   }
 
+  async updateTrackerName(telegramId: number, trackerId: number, name: string): Promise<Tracker> {
+    await this.getTracker(telegramId, trackerId);
+    const [tracker] = await this.db.update(trackers).set({ name }).where(eq(trackers.id, trackerId)).returning();
+    return tracker;
+  }
+
   /** Deletes the item; `ON DELETE CASCADE` takes its daily_logs rows with it. Returns the item as it was. */
   async deleteItem(telegramId: number, itemId: number): Promise<TrackerItem> {
     const item = await this.getItem(telegramId, itemId);
@@ -175,11 +181,18 @@ export class TrackerService {
 
   /**
    * Swaps the item's position with its neighbour in that direction. A no-op (not an error) at
-   * either end of the list, so a stale ⬆️/⬇️ tap on an edge item does nothing instead of failing.
+   * either end of the list, so a stale ⬆️/⬇️ tap on an edge item does nothing instead of failing --
+   * unless `circular` is set, in which case the "neighbour" at an edge is the item at the opposite
+   * end of the list, so repeated taps cycle through positions instead of stopping there.
    * Runs as a single transaction: better-sqlite3 executes it fully synchronously, so the read of
    * the neighbour's position can never go stale between reading it and swapping the two rows.
    */
-  async moveItem(telegramId: number, itemId: number, direction: 'up' | 'down'): Promise<{ trackerId: number }> {
+  async moveItem(
+    telegramId: number,
+    itemId: number,
+    direction: 'up' | 'down',
+    options: { circular?: boolean } = {},
+  ): Promise<{ trackerId: number }> {
     return this.db.transaction((tx) => {
       const current = tx
         .select({ id: trackerItems.id, trackerId: trackerItems.trackerId, order: trackerItems.order })
@@ -191,7 +204,7 @@ export class TrackerService {
         throw new NotFoundError(`Item ${itemId} not found`);
       }
 
-      const neighbor =
+      let neighbor =
         direction === 'up'
           ? tx
               .select({ id: trackerItems.id, order: trackerItems.order })
@@ -208,6 +221,27 @@ export class TrackerService {
               .limit(1)
               .get();
 
+      if (!neighbor && options.circular) {
+        neighbor =
+          direction === 'up'
+            ? tx
+                .select({ id: trackerItems.id, order: trackerItems.order })
+                .from(trackerItems)
+                .where(eq(trackerItems.trackerId, current.trackerId))
+                .orderBy(desc(trackerItems.order))
+                .limit(1)
+                .get()
+            : tx
+                .select({ id: trackerItems.id, order: trackerItems.order })
+                .from(trackerItems)
+                .where(eq(trackerItems.trackerId, current.trackerId))
+                .orderBy(asc(trackerItems.order))
+                .limit(1)
+                .get();
+        // A single-item list's "opposite end" is the item itself: nothing to swap.
+        if (neighbor?.id === current.id) neighbor = undefined;
+      }
+
       if (neighbor) {
         tx.update(trackerItems).set({ order: neighbor.order }).where(eq(trackerItems.id, current.id)).run();
         tx.update(trackerItems).set({ order: current.order }).where(eq(trackerItems.id, neighbor.id)).run();
@@ -215,18 +249,6 @@ export class TrackerService {
 
       return { trackerId: current.trackerId };
     });
-  }
-
-  /** Items of the tracker with their `checked` state for today in the owner's time zone. */
-  async getTodayLog(trackerId: number): Promise<DayLogItem[]> {
-    const [owner] = await this.db
-      .select({ timezone: users.timezone })
-      .from(trackers)
-      .innerJoin(users, eq(users.telegramId, trackers.telegramId))
-      .where(eq(trackers.id, trackerId));
-    if (!owner) return [];
-
-    return await this.queryDayLog(trackerId, todayDate(owner.timezone));
   }
 
   /** Items of the tracker with their `checked` state for an arbitrary day. */

@@ -3,7 +3,8 @@ import { logger } from '../../logger';
 import { NotFoundError } from '../../services/errors';
 import { trackerService } from '../../services/tracker.service';
 import { isMessageNotModified } from '../ui/telegram-errors';
-import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN, trackerKeyboard } from '../ui/toggle-button';
+import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN } from '../ui/toggle-button';
+import { buildTodayKeyboard } from './today.handler';
 
 export function registerCallbackHandler(bot: Bot): void {
   bot.callbackQuery(TOGGLE_CALLBACK_PATTERN, async (ctx) => {
@@ -23,9 +24,8 @@ export function registerCallbackHandler(bot: Bot): void {
     // even if this message is out of date and the database says otherwise.
     const checked = !isCheckedButtonText(pressed.text);
 
-    let trackerId: number;
     try {
-      ({ trackerId } = await trackerService.setItemChecked(ctx.from.id, itemId, date, checked));
+      await trackerService.setItemChecked(ctx.from.id, itemId, date, checked);
     } catch (error) {
       if (error instanceof NotFoundError) {
         logger.warn('Toggle for an item the user does not own', { telegramId: ctx.from.id, itemId });
@@ -38,10 +38,11 @@ export function registerCallbackHandler(bot: Bot): void {
     }
     await ctx.answerCallbackQuery();
 
-    // Redraw the whole message from the database, so every button of an outdated message catches up.
-    const items = await trackerService.getDayLog(ctx.from.id, trackerId, date);
+    // Redraw the whole merged keyboard from the database (every tracker, not just this item's
+    // one), so every button of an outdated message catches up.
+    const keyboard = await buildTodayKeyboard(ctx.from.id, date);
     try {
-      await ctx.editMessageReplyMarkup({ reply_markup: trackerKeyboard(items, date) });
+      await ctx.editMessageReplyMarkup({ reply_markup: keyboard });
     } catch (error) {
       if (!isMessageNotModified(error)) throw error;
     }

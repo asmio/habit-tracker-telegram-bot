@@ -18,7 +18,7 @@ export async function requireTimezone(ctx: Context, telegramId: number): Promise
   if (ctx.callbackQuery) {
     await ctx.answerCallbackQuery({ text: 'Сначала выбери часовой пояс.' });
   }
-  await promptTimezone(ctx, NOT_CONFIRMED_HINT);
+  await promptTimezone(ctx, telegramId, NOT_CONFIRMED_HINT);
   return false;
 }
 

@@ -1,60 +1,19 @@
-import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { todayDate, trackerService } from '../../services/tracker.service';
+import { Bot } from 'grammy';
 import { requireTimezone } from '../middleware/timezone-gate';
-import { trackerKeyboard } from '../ui/toggle-button';
-import { startAddItemFlow } from './additem.handler';
-import { startDeleteItemFlow } from './deleteitem.handler';
-import { startDeleteTrackerFlow } from './deletetracker.handler';
-import { startEditItemFlow } from './edititem.handler';
+import { HOME_CALLBACK_DATA, SETTINGS_CALLBACK_DATA } from '../ui/nav';
 import { startNewTrackerFlow } from './new.handler';
-import { startReorderFlow } from './reorder.handler';
-
-const MANAGEMENT_TEXT = 'Что хочешь сделать?';
-
-function managementKeyboard(): InlineKeyboard {
-  return InlineKeyboard.from([
-    [InlineKeyboard.text('✏️ Переименовать пункт', 'menu:edititem')],
-    [InlineKeyboard.text('🗑 Удалить пункт', 'menu:deleteitem')],
-    [InlineKeyboard.text('🗑 Удалить трекер', 'menu:deletetracker')],
-    [InlineKeyboard.text('🔀 Сортировка', 'menu:reorder')],
-    [InlineKeyboard.text('➕ Добавить пункт', 'menu:additem')],
-  ]);
-}
-
-/**
- * Same rendering as /today. today.handler.ts is off limits for this change, so this is recomposed
- * from its already-shared, exported pieces (trackerService, todayDate, trackerKeyboard) rather than
- * imported -- there is no private logic of that file being duplicated here.
- */
-async function showToday(ctx: Context): Promise<void> {
-  if (!ctx.from) return;
-
-  const user = await trackerService.getOrCreateUser(ctx.from.id);
-  const trackers = await trackerService.getTrackers(user.telegramId);
-  if (trackers.length === 0) {
-    await ctx.reply('У тебя пока нет трекеров. Создай первый командой /new.');
-    return;
-  }
-
-  const date = todayDate(user.timezone);
-
-  for (const tracker of trackers) {
-    const items = await trackerService.getTodayLog(tracker.id);
-    if (items.length === 0) {
-      await ctx.reply(`📋 ${tracker.name}\n\nПунктов пока нет. Добавь их командой /additem.`);
-      continue;
-    }
-
-    await ctx.reply(`📋 ${tracker.name}\n📅 ${date}`, { reply_markup: trackerKeyboard(items, date) });
-  }
-}
+import { showSettingsScreen } from './settings.handler';
+import { showHomeScreen } from './start.handler';
+import { startTimezoneFlow } from './timezone.handler';
+import { renderTodayScreen } from './today.handler';
+import { showTrackersListScreen } from './trackers.handler';
 
 export function registerMenuHandler(bot: Bot): void {
   // `bot.hears` matches on message text regardless of the timezone gate (which only sees commands
   // and callback queries), so each alias re-checks it itself before doing anything.
   bot.hears('📋 Сегодня', async (ctx) => {
     if (!ctx.from || !(await requireTimezone(ctx, ctx.from.id))) return;
-    await showToday(ctx);
+    await renderTodayScreen(ctx, ctx.from.id);
   });
 
   bot.hears('➕ Новый трекер', async (ctx) => {
@@ -62,34 +21,44 @@ export function registerMenuHandler(bot: Bot): void {
     await startNewTrackerFlow(ctx);
   });
 
-  bot.hears('✏️ Управление', async (ctx) => {
-    if (!ctx.from || !(await requireTimezone(ctx, ctx.from.id))) return;
-    await ctx.reply(MANAGEMENT_TEXT, { reply_markup: managementKeyboard() });
+  // The home screen's 3 buttons (see start.handler.ts) and the settings screen they lead to (see
+  // settings.handler.ts). Wired here, not in those files, to avoid a circular import between them
+  // (settings needs the home screen for "← Назад"; the home screen needs settings for its button).
+  // HOME_CALLBACK_DATA is the shared "← Назад" target for any screen that leads back to home.
+  bot.callbackQuery(HOME_CALLBACK_DATA, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!ctx.from) return;
+    await showHomeScreen(ctx, ctx.from.id);
   });
 
-  // Each button starts the same flow as its /command, via the function that command itself calls.
-  bot.callbackQuery('menu:edititem', async (ctx) => {
+  bot.callbackQuery('home:today', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startEditItemFlow(ctx);
+    if (!ctx.from) return;
+    await renderTodayScreen(ctx, ctx.from.id);
   });
 
-  bot.callbackQuery('menu:deleteitem', async (ctx) => {
+  bot.callbackQuery('home:trackers', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startDeleteItemFlow(ctx);
+    if (!ctx.from) return;
+    await showTrackersListScreen(ctx, ctx.from.id);
   });
 
-  bot.callbackQuery('menu:deletetracker', async (ctx) => {
+  // The trackers list's own "➕ Новый трекер" row (see trackers.handler.ts). Wired here rather than
+  // there, to avoid a circular import: trackers.handler.ts would need new.handler.ts for this, and
+  // new.handler.ts needs trackers.handler.ts's `showTrackersListScreen` for its own success screen.
+  bot.callbackQuery('trackers:new', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startDeleteTrackerFlow(ctx);
+    await startNewTrackerFlow(ctx, 'trackers:list');
   });
 
-  bot.callbackQuery('menu:reorder', async (ctx) => {
+  bot.callbackQuery(SETTINGS_CALLBACK_DATA, async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startReorderFlow(ctx);
+    if (!ctx.from) return;
+    await showSettingsScreen(ctx, ctx.from.id);
   });
 
-  bot.callbackQuery('menu:additem', async (ctx) => {
+  bot.callbackQuery('settings:timezone', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startAddItemFlow(ctx);
+    await startTimezoneFlow(ctx);
   });
 }

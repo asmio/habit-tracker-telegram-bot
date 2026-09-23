@@ -1,6 +1,3 @@
-import { InlineKeyboard } from 'grammy';
-import type { DayLogItem } from '../../services/tracker.service';
-
 const MARK_CHECKED = '☑';
 const MARK_UNCHECKED = '☐';
 
@@ -17,13 +14,4 @@ export function toggleButtonText(label: string, checked: boolean): string {
 
 export function isCheckedButtonText(buttonText: string): boolean {
   return buttonText.startsWith(MARK_CHECKED);
-}
-
-/** One toggle button per row; built from rows so there is no trailing empty row. */
-export function trackerKeyboard(items: DayLogItem[], date: string): InlineKeyboard {
-  return InlineKeyboard.from(
-    items.map((item) => [
-      InlineKeyboard.text(toggleButtonText(item.label, item.checked), toggleCallbackData(item.id, date)),
-    ]),
-  );
 }
