@@ -1,9 +1,13 @@
 import { createBot } from './bot';
 import { loadBotConfig } from './config';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { db } from './db';
 import { logger } from './logger';
 
 async function main(): Promise<void> {
   try {
+    migrate(db, { migrationsFolder: './drizzle' });
+    
     const { botToken } = loadBotConfig();
     const bot = createBot(botToken);
 
