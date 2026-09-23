@@ -4,7 +4,6 @@ import { registerMenuHandler } from './commands/menu.handler';
 import { registerNewHandler } from './commands/new.handler';
 import { registerStartHandler } from './commands/start.handler';
 import { registerTimezoneHandler } from './commands/timezone.handler';
-import { registerTodayHandler } from './commands/today.handler';
 import { registerTrackersHandler } from './commands/trackers.handler';
 import { registerTimezoneGate } from './middleware/timezone-gate';
 
@@ -18,7 +17,6 @@ export function registerHandlers(bot: Bot): void {
   registerMenuHandler(bot);
 
   registerNewHandler(bot);
-  registerTodayHandler(bot);
   registerTrackersHandler(bot);
   registerCallbackHandler(bot);
 }

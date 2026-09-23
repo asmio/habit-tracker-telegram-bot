@@ -1,11 +1,10 @@
-import { Bot, InlineKeyboard, type Context } from 'grammy';
+import { InlineKeyboard, type Context } from 'grammy';
+import type { InlineKeyboardButton } from 'grammy/types';
 import { todayDate, trackerService } from '../../services/tracker.service';
+import { disabledButton } from '../ui/disabled-button';
 import { HOME_CALLBACK_DATA } from '../ui/nav';
 import { showScreen } from '../ui/screen';
 import { toggleButtonText, toggleCallbackData } from '../ui/toggle-button';
-
-/** The middle "📋 Tracker name" row per tracker is a read-only header, not a control. */
-const HEADER_CALLBACK_DATA = 'today-header';
 
 /** The `callback_data` of the home screen's button that opens this screen. */
 const TODAY_SCREEN = 'home:today';
@@ -25,10 +24,10 @@ export async function buildTodayKeyboard(telegramId: number, date: string): Prom
   // One width for the whole screen, so the checkboxes line up across trackers too.
   const labelWidth = Math.max(0, ...logs.flatMap(({ items }) => items.map((item) => [...item.label].length)));
 
-  const rows: ReturnType<typeof InlineKeyboard.text>[][] = [];
+  const rows: InlineKeyboardButton[][] = [];
   for (const { tracker, items } of logs) {
     const header = items.length === 0 ? `── 📋 ${tracker.name} — нет пунктов ──` : `── 📋 ${tracker.name} ──`;
-    rows.push([InlineKeyboard.text(header, HEADER_CALLBACK_DATA)]);
+    rows.push([disabledButton(header)]);
     for (const item of items) {
       rows.push([
         InlineKeyboard.text(toggleButtonText(item.label, item.checked, labelWidth), toggleCallbackData(item.id, date)),
@@ -58,10 +57,4 @@ export async function renderTodayScreen(ctx: Context, telegramId: number): Promi
   // The date is baked into every button, so an old screen keeps toggling its own day.
   const date = todayDate(user.timezone);
   await showScreen(ctx, telegramId, TODAY_SCREEN, `📅 ${date}`, await buildTodayKeyboard(telegramId, date));
-}
-
-export function registerTodayHandler(bot: Bot): void {
-  bot.callbackQuery(HEADER_CALLBACK_DATA, async (ctx) => {
-    await ctx.answerCallbackQuery();
-  });
 }

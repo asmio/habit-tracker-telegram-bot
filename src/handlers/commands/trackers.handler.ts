@@ -1,9 +1,11 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
+import type { InlineKeyboardButton } from 'grammy/types';
 import { logger } from '../../logger';
 import { NotFoundError } from '../../services/errors';
 import { sessionService } from '../../services/session.service';
 import { trackerService } from '../../services/tracker.service';
 import type { Tracker, TrackerItem } from '../../db/schema';
+import { disabledButton } from '../ui/disabled-button';
 import { HOME_CALLBACK_DATA } from '../ui/nav';
 import { showScreen } from '../ui/screen';
 import { deleteMessageSafely, isMessageNotModified } from '../ui/telegram-errors';
@@ -12,8 +14,6 @@ import { backButton, confirmKeyboard } from '../ui/tracker-picker';
 const MAX_LENGTH = 64;
 const NO_TRACKERS_TEXT = 'Трекеров пока нет.';
 
-/** The middle "N. Label" button in sort mode is a read-only position marker, not a control. */
-const SORT_LABEL_CALLBACK_DATA = 'trackers:sort-label';
 const SORT_MOVE_PATTERN = /^trackers:sortmove:(\d+):(up|down)$/;
 
 type Button = ReturnType<typeof InlineKeyboard.text>;
@@ -111,8 +111,9 @@ async function showTrackerScreen(ctx: Context, telegramId: number, trackerId: nu
 }
 
 function sortKeyboard(trackerId: number, items: TrackerItem[]): InlineKeyboard {
-  const rows: Button[][] = items.map((item, index) => [
-    InlineKeyboard.text(`${index + 1}. ${item.label}`, SORT_LABEL_CALLBACK_DATA),
+  // The "N. Label" button is a read-only position marker, not a control.
+  const rows: InlineKeyboardButton[][] = items.map((item, index) => [
+    disabledButton(`${index + 1}. ${item.label}`),
     InlineKeyboard.text('⬇️', `trackers:sortmove:${item.id}:down`),
   ]);
   rows.push([InlineKeyboard.text('✅ Готово', `trackers:open:${trackerId}`)]);
@@ -167,10 +168,6 @@ export function registerTrackersHandler(bot: Bot): void {
       logger.warn('Sort screen request for a tracker the user does not own', { telegramId: ctx.from.id, trackerId });
       await showTrackersListScreen(ctx, ctx.from.id, '⚠️ Трекер не найден.');
     }
-  });
-
-  bot.callbackQuery(SORT_LABEL_CALLBACK_DATA, async (ctx) => {
-    await ctx.answerCallbackQuery();
   });
 
   bot.callbackQuery(SORT_MOVE_PATTERN, async (ctx) => {
