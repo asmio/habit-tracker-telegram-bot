@@ -35,7 +35,7 @@ export function registerMenuHandler(bot: Bot): void {
   // new.handler.ts needs trackers.handler.ts's `showTrackersListScreen` for its own success screen.
   bot.callbackQuery('trackers:new', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await startNewTrackerFlow(ctx, 'trackers:list');
+    await startNewTrackerFlow(ctx);
   });
 
   bot.callbackQuery(SETTINGS_CALLBACK_DATA, async (ctx) => {

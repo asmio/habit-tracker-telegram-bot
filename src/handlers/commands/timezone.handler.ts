@@ -4,37 +4,25 @@ import {
   timezoneButtonLabel,
   timezoneFromLocation,
 } from '../../services/timezone.service';
+import { sessionService } from '../../services/session.service';
 import { isValidTimezone, trackerService } from '../../services/tracker.service';
-import { createPendingInput } from '../middleware/pending-input';
-import { EMPTY_KEYBOARD, showScreen, type ScreenRef } from '../ui/screen';
+import { EMPTY_KEYBOARD, showScreen } from '../ui/screen';
 import { deleteMessageSafely } from '../ui/telegram-errors';
 import { showHomeScreen } from './start.handler';
 
 const OTHER_PROMPT = 'Пришли название часового пояса в формате Регион/Город, например Asia/Almaty.';
 const LOCATION_PROMPT = '📍 Отправь геолокацию кнопкой ниже.';
 export const DEFAULT_PROMPT = 'Выбери свой часовой пояс — от него зависит, когда для тебя начинается новый день.';
-const LOCATION_TTL_MS = 5 * 60 * 1000;
 
-const pendingOther = createPendingInput<ScreenRef>();
-
-// A shared location arrives as a plain message, not as a reply, so unlike the other dialogs it
-// cannot be tied to a prompt. This is the only in-memory state: who tapped "by location" recently.
-// Losing it on restart just means the user taps the button again.
-const awaitingLocation = new Map<number, number>();
-
-function expectLocation(telegramId: number): void {
-  const now = Date.now();
-  for (const [id, expiresAt] of awaitingLocation) {
-    if (expiresAt <= now) awaitingLocation.delete(id);
-  }
-  awaitingLocation.set(telegramId, now + LOCATION_TTL_MS);
-}
-
-function consumeLocationExpectation(telegramId: number): boolean {
-  const expiresAt = awaitingLocation.get(telegramId);
-  awaitingLocation.delete(telegramId);
-  return expiresAt !== undefined && expiresAt > Date.now();
-}
+/**
+ * The two prompts of this file wait for input, and (like new.handler.ts) the wait *is* the route
+ * stored in the user's session: typed text is a time zone name exactly while `TZ_OTHER_SCREEN` is
+ * the session's screen, and a shared location is taken exactly while `TZ_LOCATION_SCREEN` is.
+ * So neither wait is lost by a restart, and showing any other screen ends it by itself. Any other
+ * location a user shares is just a place shared in the chat and is ignored.
+ */
+const TZ_OTHER_SCREEN = 'tz-other';
+const TZ_LOCATION_SCREEN = 'tz-location';
 
 /**
  * A message sent with a `ReplyKeyboardMarkup`-family `reply_markup` (`remove_keyboard` included)
@@ -98,7 +86,7 @@ export async function promptTimezone(ctx: Context, telegramId: number, text: str
     InlineKeyboard.text('📍 По геолокации', 'tz-location'),
   ]);
 
-  await showScreen(ctx, telegramId, text, InlineKeyboard.from(rows));
+  await showScreen(ctx, telegramId, 'settings:timezone', text, InlineKeyboard.from(rows));
 }
 
 /** Shows the zone picker, mentioning the current zone if one is already confirmed. Shared by the timezone gate and settings. */
@@ -129,19 +117,17 @@ export function registerTimezoneHandler(bot: Bot): void {
 
   bot.callbackQuery('tz-other', async (ctx) => {
     await ctx.answerCallbackQuery();
-    const ref = await showScreen(ctx, ctx.from.id, OTHER_PROMPT, EMPTY_KEYBOARD);
-    pendingOther.set(ctx.from.id, ref);
+    await showScreen(ctx, ctx.from.id, TZ_OTHER_SCREEN, OTHER_PROMPT, EMPTY_KEYBOARD);
   });
 
   bot.callbackQuery('tz-location', async (ctx) => {
     await ctx.answerCallbackQuery();
-    expectLocation(ctx.from.id);
 
     // Edits the picker away first, so its now-stale zone buttons stop being tappable, before the
     // unavoidably fresh send below (a `ReplyKeyboardMarkup` -- here, the location request -- can
     // never be attached by editing, so it's deliberately not tracked as the screen either: the
-    // edited picker above stays tracked, ready for message:location's handler below to edit next).
-    await showScreen(ctx, ctx.from.id, LOCATION_PROMPT, EMPTY_KEYBOARD);
+    // edited picker above stays the session's screen, ready for message:location's handler below to edit next).
+    await showScreen(ctx, ctx.from.id, TZ_LOCATION_SCREEN, LOCATION_PROMPT, EMPTY_KEYBOARD);
     await ctx.reply(
       'Нажми кнопку ниже, чтобы отправить геолокацию. Координаты не сохраняются: по ним я один раз определю часовой пояс.',
       { reply_markup: new Keyboard().requestLocation('📍 Отправить геолокацию').oneTime().resized() },
@@ -150,20 +136,20 @@ export function registerTimezoneHandler(bot: Bot): void {
 
   bot.on('message:text', async (ctx, next) => {
     if (!ctx.from) return next();
-    const state = pendingOther.consume(ctx.from.id);
-    if (!state) return next();
+    const session = await sessionService.getSession(ctx.from.id);
+    if (session?.screen !== TZ_OTHER_SCREEN) return next();
     await deleteMessageSafely(ctx);
 
     const timezone = ctx.msg.text.trim();
     if (!isValidTimezone(timezone)) {
-      // showScreen clears pending state first (see screen.ts), so re-arm it AFTER, not before.
+      // Same screen again, so the bot keeps waiting: let the user retry on the same message.
       await showScreen(
         ctx,
         ctx.from.id,
+        TZ_OTHER_SCREEN,
         `⚠️ Не знаю такого пояса. Нужен формат Регион/Город, например Europe/Warsaw.\n\n${OTHER_PROMPT}`,
         EMPTY_KEYBOARD,
       );
-      pendingOther.set(ctx.from.id, state); // keep waiting: let the user retry on the same message
       return;
     }
 
@@ -172,8 +158,9 @@ export function registerTimezoneHandler(bot: Bot): void {
   });
 
   bot.on('message:location', async (ctx) => {
-    // Only a location the user was just asked for: any other one is just a place shared in the chat.
-    if (!ctx.from || !consumeLocationExpectation(ctx.from.id)) return;
+    if (!ctx.from) return;
+    const session = await sessionService.getSession(ctx.from.id);
+    if (session?.screen !== TZ_LOCATION_SCREEN) return;
 
     const { latitude, longitude } = ctx.msg.location;
     const timezone = timezoneFromLocation(latitude, longitude);

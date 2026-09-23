@@ -7,6 +7,9 @@ import { toggleButtonText, toggleCallbackData } from '../ui/toggle-button';
 /** The middle "📋 Tracker name" row per tracker is a read-only header, not a control. */
 const HEADER_CALLBACK_DATA = 'today-header';
 
+/** The `callback_data` of the home screen's button that opens this screen. */
+const TODAY_SCREEN = 'home:today';
+
 /**
  * One combined keyboard for every tracker: a header row per tracker, then its item rows, then the
  * quick-nav row -- baked in here rather than at each call site, so both the initial render and
@@ -37,6 +40,7 @@ export async function renderTodayScreen(ctx: Context, telegramId: number): Promi
     await showScreen(
       ctx,
       telegramId,
+      TODAY_SCREEN,
       'У тебя пока нет трекеров.',
       InlineKeyboard.from([[InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]]),
     );
@@ -45,7 +49,7 @@ export async function renderTodayScreen(ctx: Context, telegramId: number): Promi
 
   // The date is baked into every button, so an old screen keeps toggling its own day.
   const date = todayDate(user.timezone);
-  await showScreen(ctx, telegramId, `📅 ${date}`, await buildTodayKeyboard(telegramId, date));
+  await showScreen(ctx, telegramId, TODAY_SCREEN, `📅 ${date}`, await buildTodayKeyboard(telegramId, date));
 }
 
 export function registerTodayHandler(bot: Bot): void {

@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Context } from 'grammy';
-import { backToHomeButton } from '../ui/nav';
+import { backToHomeButton, SETTINGS_CALLBACK_DATA } from '../ui/nav';
 import { showScreen } from '../ui/screen';
 
 const SETTINGS_TEXT = '⚙️ Настройки';
@@ -17,5 +17,5 @@ function settingsKeyboard(): InlineKeyboard {
  * screen for its button). "← Назад" itself is the shared `HOME_CALLBACK_DATA` (see ui/nav.ts).
  */
 export async function showSettingsScreen(ctx: Context, telegramId: number): Promise<void> {
-  await showScreen(ctx, telegramId, SETTINGS_TEXT, settingsKeyboard());
+  await showScreen(ctx, telegramId, SETTINGS_CALLBACK_DATA, SETTINGS_TEXT, settingsKeyboard());
 }

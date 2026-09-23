@@ -34,6 +34,19 @@ export const trackerItems = sqliteTable('tracker_items', {
   createdAt: createdAt(),
 });
 
+/**
+ * The one message per user the bot treats as "the screen" (see `ui/screen.ts`), so it survives
+ * restarts. No foreign key to `users` on purpose: a session may be written for a button tapped on
+ * an old message before that user's row exists again (e.g. after a database reset).
+ */
+export const userSessions = sqliteTable('user_sessions', {
+  telegramId: integer('telegram_id').primaryKey(),
+  messageId: integer('message_id').notNull(),
+  /** Route of the screen shown in `messageId`, in `callback_data` format (e.g. `trackers:open:5`). */
+  screen: text('screen').notNull(),
+  updatedAt: text('updated_at').notNull().default(sql`(CURRENT_TIMESTAMP)`),
+});
+
 export const dailyLogs = sqliteTable(
   'daily_logs',
   {
@@ -57,3 +70,4 @@ export const dailyLogs = sqliteTable(
 export type User = typeof users.$inferSelect;
 export type Tracker = typeof trackers.$inferSelect;
 export type TrackerItem = typeof trackerItems.$inferSelect;
+export type UserSession = typeof userSessions.$inferSelect;

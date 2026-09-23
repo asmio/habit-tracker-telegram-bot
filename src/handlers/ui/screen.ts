@@ -1,9 +1,9 @@
 import type { Context } from 'grammy';
 import { logger } from '../../logger';
-import { clearPendingInput } from '../middleware/pending-input';
+import { sessionService } from '../../services/session.service';
 import { isMessageNotModified } from './telegram-errors';
 
-export interface ScreenRef {
+interface ScreenRef {
   chatId: number;
   messageId: number;
 }
@@ -21,54 +21,70 @@ type InlineKeyboardMarkup = NonNullable<EditMessageTextOptions['reply_markup']>;
  */
 export const EMPTY_KEYBOARD: InlineKeyboardMarkup = { inline_keyboard: [] };
 
-/** The one message per user that the bot currently treats as "the screen" — see `showScreen`. */
-const screens = new Map<number, ScreenRef>();
+/**
+ * Which message should become the new screen: the one whose button was just tapped, if any (this is
+ * what keeps buttons on an old message working after a restart, or after /start replaced the
+ * screen -- the tap edits that very message instead of spawning a new one), else the persisted
+ * session's message. The persisted `chatId` is the user's id: the bot only talks in private chats.
+ */
+async function resolveTarget(ctx: Context, telegramId: number): Promise<ScreenRef | undefined> {
+  const tapped = ctx.callbackQuery?.message;
+  if (tapped) return { chatId: tapped.chat.id, messageId: tapped.message_id };
+
+  const session = await sessionService.getSession(telegramId);
+  return session ? { chatId: telegramId, messageId: session.messageId } : undefined;
+}
 
 /**
- * Renders a top-level screen for a user: edits their previously tracked message in place if one
- * exists and the edit succeeds, otherwise sends a fresh message and starts tracking that instead.
- * This is what makes the bot feel like a single screen instead of a growing chat log — every
- * command and every button should call this rather than `ctx.reply` directly.
+ * Renders a top-level screen for a user: edits the target message in place if there is one and the
+ * edit succeeds, otherwise sends a fresh message. Either way the message that ends up showing the
+ * screen is persisted as the user's session, together with `screen` -- its route in `callback_data`
+ * format (e.g. `trackers:open:5`). This is what makes the bot feel like a single screen instead of
+ * a growing chat log -- every command and every button should call this rather than `ctx.reply`.
  *
  * Never pass this the ref of a message that was ever sent with a `ReplyKeyboardMarkup` (including
  * `remove_keyboard`): Telegram refuses to attach an `InlineKeyboardMarkup` to one via edit ("message
  * can't be edited"), which silently falls through to a confusing extra fresh message below. Such a
  * send should stay a one-off, disposable message instead (see timezone.handler.ts's `sendDisposable`).
  *
- * Always clears any pending free-text input first (see `clearPendingInput`): showing a *different*
- * screen means whatever the user was previously asked to type no longer has anywhere to go.
+ * The stored `screen` is also how the bot knows it is waiting for typed text (see e.g.
+ * new.handler.ts): a prompt is "active" exactly while it is the session's screen, so showing any
+ * *different* screen cancels it by itself, and the wait survives a restart along with the session.
  */
 export async function showScreen(
   ctx: Context,
   telegramId: number,
+  screen: string,
   text: string,
   replyMarkup: InlineKeyboardMarkup,
-): Promise<ScreenRef> {
-  clearPendingInput(telegramId);
-
-  const tracked = screens.get(telegramId);
-  if (tracked) {
+): Promise<void> {
+  const target = await resolveTarget(ctx, telegramId);
+  if (target) {
     try {
-      await ctx.api.editMessageText(tracked.chatId, tracked.messageId, text, { reply_markup: replyMarkup });
-      return tracked;
+      await ctx.api.editMessageText(target.chatId, target.messageId, text, { reply_markup: replyMarkup });
+      await sessionService.saveSession(telegramId, target.messageId, screen);
+      return;
     } catch (error) {
-      if (isMessageNotModified(error)) return tracked;
-      // Message deleted, chat gone, or anything else that makes editing impossible: fall through
-      // to a fresh send below. A genuinely broken chat (e.g. the bot was blocked) will fail there
-      // too, and that failure is left to propagate to `bot.catch`. Logged (not silently swallowed):
-      // a message whose reply_markup was ever a ReplyKeyboardMarkup can never be edited into one
-      // with an InlineKeyboardMarkup ("message can't be edited"), which previously fell through to
-      // this same fresh-send path invisibly and looked like a duplicate message.
+      if (isMessageNotModified(error)) {
+        await sessionService.saveSession(telegramId, target.messageId, screen);
+        return;
+      }
+      // "message to edit not found" (deleted, or a session pointing at a message that is gone),
+      // chat gone, or anything else that makes editing impossible: fall through to a fresh send
+      // below. A genuinely broken chat (e.g. the bot was blocked) will fail there too, and that
+      // failure is left to propagate to `bot.catch`. Logged (not silently swallowed): a message
+      // whose reply_markup was ever a ReplyKeyboardMarkup can never be edited into one with an
+      // InlineKeyboardMarkup ("message can't be edited"), which previously fell through to this
+      // same fresh-send path invisibly and looked like a duplicate message.
       logger.warn('showScreen: edit failed, falling back to a fresh send', {
         telegramId,
-        tracked,
+        screen,
+        target,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   const sent = await ctx.reply(text, { reply_markup: replyMarkup });
-  const ref: ScreenRef = { chatId: sent.chat.id, messageId: sent.message_id };
-  screens.set(telegramId, ref);
-  return ref;
+  await sessionService.saveSession(telegramId, sent.message_id, screen);
 }

@@ -1,11 +1,11 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
 import { logger } from '../../logger';
 import { NotFoundError } from '../../services/errors';
+import { sessionService } from '../../services/session.service';
 import { trackerService } from '../../services/tracker.service';
 import type { Tracker, TrackerItem } from '../../db/schema';
-import { createPendingInput } from '../middleware/pending-input';
 import { HOME_CALLBACK_DATA } from '../ui/nav';
-import { showScreen, type ScreenRef } from '../ui/screen';
+import { showScreen } from '../ui/screen';
 import { deleteMessageSafely, isMessageNotModified } from '../ui/telegram-errors';
 import { backButton, confirmKeyboard } from '../ui/tracker-picker';
 
@@ -16,15 +16,6 @@ const NO_TRACKERS_TEXT = 'Трекеров пока нет.';
 const SORT_LABEL_CALLBACK_DATA = 'trackers:sort-label';
 const SORT_MOVE_PATTERN = /^trackers:sortmove:(\d+):(up|down)$/;
 
-type PendingTrackersInput = ScreenRef &
-  (
-    | { kind: 'rename-tracker'; trackerId: number; trackerName: string }
-    | { kind: 'rename-item'; itemId: number; trackerId: number; label: string }
-    | { kind: 'add-item'; trackerId: number; trackerName: string }
-  );
-
-const pending = createPendingInput<PendingTrackersInput>();
-
 type Button = ReturnType<typeof InlineKeyboard.text>;
 
 function renameText(name: string): string {
@@ -33,6 +24,47 @@ function renameText(name: string): string {
 
 function addItemText(trackerName: string): string {
   return `Введи название нового пункта для трекера «${trackerName}»:`;
+}
+
+/**
+ * The three prompts of this file ask for typed text. As in new.handler.ts, the wait *is* the route
+ * stored in the user's session (`trackers:renametracker:5`, ...): it survives a restart and ends by
+ * itself when any other screen is shown, and everything else a prompt needs is re-read from the
+ * database by the id in that route.
+ */
+const PROMPT_ROUTE = /^trackers:(renametracker|renameitem|additem):(\d+)$/;
+
+type PromptKind = 'renametracker' | 'renameitem' | 'additem';
+
+interface Prompt {
+  trackerId: number;
+  text: string;
+  backCallbackData: string;
+  save: (value: string) => Promise<unknown>;
+}
+
+/** Throws `NotFoundError` if the tracker/item is gone, or is not the user's. */
+async function loadPrompt(telegramId: number, kind: PromptKind, id: number): Promise<Prompt> {
+  if (kind === 'renameitem') {
+    const item = await trackerService.getItem(telegramId, id);
+    return {
+      trackerId: item.trackerId,
+      text: renameText(item.label),
+      backCallbackData: `trackers:item:${item.id}`,
+      save: (label) => trackerService.updateItemLabel(telegramId, item.id, label),
+    };
+  }
+
+  const tracker = await trackerService.getTracker(telegramId, id);
+  return {
+    trackerId: tracker.id,
+    text: kind === 'renametracker' ? renameText(tracker.name) : addItemText(tracker.name),
+    backCallbackData: `trackers:open:${tracker.id}`,
+    save:
+      kind === 'renametracker'
+        ? (name) => trackerService.updateTrackerName(telegramId, tracker.id, name)
+        : (label) => trackerService.createItem(telegramId, tracker.id, label),
+  };
 }
 
 /** The trackers list screen. Shared by the home screen's "🗂 Трекеры" button and every "← Назад" that leads back to it. */
@@ -46,7 +78,7 @@ export async function showTrackersListScreen(ctx: Context, telegramId: number, p
   rows.push([InlineKeyboard.text('➕ Новый трекер', 'trackers:new')]);
   rows.push([backButton(HOME_CALLBACK_DATA)]);
 
-  await showScreen(ctx, telegramId, prefix ? `${prefix}\n\n${text}` : text, InlineKeyboard.from(rows));
+  await showScreen(ctx, telegramId, 'trackers:list', prefix ? `${prefix}\n\n${text}` : text, InlineKeyboard.from(rows));
 }
 
 async function showTrackerScreen(ctx: Context, telegramId: number, trackerId: number, prefix?: string): Promise<void> {
@@ -69,7 +101,13 @@ async function showTrackerScreen(ctx: Context, telegramId: number, trackerId: nu
   ]);
   rows.push([backButton('trackers:list'), InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]);
 
-  await showScreen(ctx, telegramId, prefix ? `${prefix}\n\n${text}` : text, InlineKeyboard.from(rows));
+  await showScreen(
+    ctx,
+    telegramId,
+    `trackers:open:${tracker.id}`,
+    prefix ? `${prefix}\n\n${text}` : text,
+    InlineKeyboard.from(rows),
+  );
 }
 
 function sortKeyboard(trackerId: number, items: TrackerItem[]): InlineKeyboard {
@@ -85,7 +123,7 @@ async function showTrackerSortScreen(ctx: Context, telegramId: number, trackerId
   const tracker = await trackerService.getTracker(telegramId, trackerId);
   const items = await trackerService.getItems(telegramId, trackerId);
   const text = `📋 ${tracker.name}` + (items.length === 0 ? '\n\nПунктов пока нет.' : '');
-  await showScreen(ctx, telegramId, text, sortKeyboard(tracker.id, items));
+  await showScreen(ctx, telegramId, `trackers:sort:${tracker.id}`, text, sortKeyboard(tracker.id, items));
 }
 
 async function showItemScreen(ctx: Context, telegramId: number, itemId: number): Promise<void> {
@@ -97,7 +135,7 @@ async function showItemScreen(ctx: Context, telegramId: number, itemId: number):
     ],
     [backButton(`trackers:open:${item.trackerId}`), InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)],
   ];
-  await showScreen(ctx, telegramId, `📝 ${item.label}`, InlineKeyboard.from(rows));
+  await showScreen(ctx, telegramId, `trackers:item:${item.id}`, `📝 ${item.label}`, InlineKeyboard.from(rows));
 }
 
 export function registerTrackersHandler(bot: Bot): void {
@@ -204,8 +242,13 @@ export function registerTrackersHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    const ref = await showScreen(ctx, ctx.from.id, renameText(tracker.name), InlineKeyboard.from([[backButton(`trackers:open:${tracker.id}`)]]));
-    pending.set(ctx.from.id, { ...ref, kind: 'rename-tracker', trackerId: tracker.id, trackerName: tracker.name });
+    await showScreen(
+      ctx,
+      ctx.from.id,
+      `trackers:renametracker:${tracker.id}`,
+      renameText(tracker.name),
+      InlineKeyboard.from([[backButton(`trackers:open:${tracker.id}`)]]),
+    );
   });
 
   bot.callbackQuery(/^trackers:additem:(\d+)$/, async (ctx) => {
@@ -222,8 +265,13 @@ export function registerTrackersHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    const ref = await showScreen(ctx, ctx.from.id, addItemText(tracker.name), InlineKeyboard.from([[backButton(`trackers:open:${tracker.id}`)]]));
-    pending.set(ctx.from.id, { ...ref, kind: 'add-item', trackerId: tracker.id, trackerName: tracker.name });
+    await showScreen(
+      ctx,
+      ctx.from.id,
+      `trackers:additem:${tracker.id}`,
+      addItemText(tracker.name),
+      InlineKeyboard.from([[backButton(`trackers:open:${tracker.id}`)]]),
+    );
   });
 
   bot.callbackQuery(/^trackers:renameitem:(\d+)$/, async (ctx) => {
@@ -240,8 +288,13 @@ export function registerTrackersHandler(bot: Bot): void {
     }
 
     await ctx.answerCallbackQuery();
-    const ref = await showScreen(ctx, ctx.from.id, renameText(item.label), InlineKeyboard.from([[backButton(`trackers:item:${item.id}`)]]));
-    pending.set(ctx.from.id, { ...ref, kind: 'rename-item', itemId: item.id, trackerId: item.trackerId, label: item.label });
+    await showScreen(
+      ctx,
+      ctx.from.id,
+      `trackers:renameitem:${item.id}`,
+      renameText(item.label),
+      InlineKeyboard.from([[backButton(`trackers:item:${item.id}`)]]),
+    );
   });
 
   bot.callbackQuery(/^trackers:deltracker:(\d+)$/, async (ctx) => {
@@ -261,6 +314,7 @@ export function registerTrackersHandler(bot: Bot): void {
     await showScreen(
       ctx,
       ctx.from.id,
+      `trackers:deltracker:${tracker.id}`,
       `Удалить «${tracker.name}» вместе со всеми пунктами и историей?`,
       confirmKeyboard('🗑 Да, удалить', `trackers:deltrackerconfirm:${tracker.id}`, `trackers:open:${tracker.id}`),
     );
@@ -300,6 +354,7 @@ export function registerTrackersHandler(bot: Bot): void {
     await showScreen(
       ctx,
       ctx.from.id,
+      `trackers:delitem:${item.id}`,
       `Удалить «${item.label}»?`,
       confirmKeyboard('🗑 Да', `trackers:delitemconfirm:${item.id}`, `trackers:item:${item.id}`),
     );
@@ -324,39 +379,37 @@ export function registerTrackersHandler(bot: Bot): void {
 
   bot.on('message:text', async (ctx, next) => {
     if (!ctx.from) return next();
-    const state = pending.consume(ctx.from.id);
-    if (!state) return next();
+    const session = await sessionService.getSession(ctx.from.id);
+    const route = session && PROMPT_ROUTE.exec(session.screen);
+    if (!session || !route) return next();
     await deleteMessageSafely(ctx);
+
+    let prompt: Prompt;
+    try {
+      prompt = await loadPrompt(ctx.from.id, route[1] as PromptKind, Number(route[2]));
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      await showTrackersListScreen(ctx, ctx.from.id, '⚠️ Трекер не найден.');
+      return;
+    }
 
     const text = ctx.msg.text.trim();
     if (text.length === 0 || text.length > MAX_LENGTH) {
       const reason = text.length === 0 ? 'Название не может быть пустым.' : `Слишком длинное название (максимум ${MAX_LENGTH} символов).`;
-      const promptText =
-        state.kind === 'rename-tracker'
-          ? renameText(state.trackerName)
-          : state.kind === 'rename-item'
-            ? renameText(state.label)
-            : addItemText(state.trackerName);
-      const backCallbackData =
-        state.kind === 'rename-item' ? `trackers:item:${state.itemId}` : `trackers:open:${state.trackerId}`;
-
-      // showScreen clears pending state first (see screen.ts), so re-arm it AFTER, not before.
-      await showScreen(ctx, ctx.from.id, `⚠️ ${reason}\n\n${promptText}`, InlineKeyboard.from([[backButton(backCallbackData)]]));
-      pending.set(ctx.from.id, state); // keep waiting: let the user retry on the same message
+      // Same screen again, so the bot keeps waiting: let the user retry on the same message.
+      await showScreen(
+        ctx,
+        ctx.from.id,
+        session.screen,
+        `⚠️ ${reason}\n\n${prompt.text}`,
+        InlineKeyboard.from([[backButton(prompt.backCallbackData)]]),
+      );
       return;
     }
 
     try {
-      if (state.kind === 'rename-tracker') {
-        await trackerService.updateTrackerName(ctx.from.id, state.trackerId, text);
-        await showTrackerScreen(ctx, ctx.from.id, state.trackerId);
-      } else if (state.kind === 'rename-item') {
-        await trackerService.updateItemLabel(ctx.from.id, state.itemId, text);
-        await showTrackerScreen(ctx, ctx.from.id, state.trackerId);
-      } else {
-        await trackerService.createItem(ctx.from.id, state.trackerId, text);
-        await showTrackerScreen(ctx, ctx.from.id, state.trackerId);
-      }
+      await prompt.save(text);
+      await showTrackerScreen(ctx, ctx.from.id, prompt.trackerId);
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
       await showTrackersListScreen(ctx, ctx.from.id, '⚠️ Трекер не найден.');
