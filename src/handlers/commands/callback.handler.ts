@@ -4,7 +4,7 @@ import { NotFoundError } from '../../services/errors';
 import { trackerService } from '../../services/tracker.service';
 import { isMessageNotModified } from '../ui/telegram-errors';
 import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN } from '../ui/toggle-button';
-import { buildTodayKeyboard } from './today.handler';
+import { buildTodayKeyboard, renderTodayScreen } from './today.handler';
 
 export function registerCallbackHandler(bot: Bot): void {
   bot.callbackQuery(TOGGLE_CALLBACK_PATTERN, async (ctx) => {
@@ -16,7 +16,8 @@ export function registerCallbackHandler(bot: Bot): void {
     const rows = message && 'reply_markup' in message ? message.reply_markup?.inline_keyboard : undefined;
     const pressed = rows?.flat().find((button) => 'callback_data' in button && button.callback_data === data);
     if (!pressed) {
-      await ctx.answerCallbackQuery({ text: 'Сообщение устарело. Открой /today заново.' });
+      await ctx.answerCallbackQuery({ text: 'Сообщение устарело, обновляю.' });
+      await renderTodayScreen(ctx, ctx.from.id);
       return;
     }
 

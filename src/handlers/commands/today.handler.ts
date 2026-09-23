@@ -29,7 +29,7 @@ export async function buildTodayKeyboard(telegramId: number, date: string): Prom
   return InlineKeyboard.from(rows);
 }
 
-/** Renders the single combined "today" screen for a user. Shared by /today and the menu. */
+/** Renders the single combined "today" screen for a user. Shared by the home screen and callback.handler.ts. */
 export async function renderTodayScreen(ctx: Context, telegramId: number): Promise<void> {
   const user = await trackerService.getOrCreateUser(telegramId);
   const trackers = await trackerService.getTrackers(telegramId);
@@ -37,7 +37,7 @@ export async function renderTodayScreen(ctx: Context, telegramId: number): Promi
     await showScreen(
       ctx,
       telegramId,
-      'У тебя пока нет трекеров. Создай первый командой /new.',
+      'У тебя пока нет трекеров.',
       InlineKeyboard.from([[InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]]),
     );
     return;
@@ -49,11 +49,6 @@ export async function renderTodayScreen(ctx: Context, telegramId: number): Promi
 }
 
 export function registerTodayHandler(bot: Bot): void {
-  bot.command('today', async (ctx) => {
-    if (!ctx.from) return;
-    await renderTodayScreen(ctx, ctx.from.id);
-  });
-
   bot.callbackQuery(HEADER_CALLBACK_DATA, async (ctx) => {
     await ctx.answerCallbackQuery();
   });

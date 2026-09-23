@@ -17,10 +17,10 @@ interface PendingNewTracker extends ScreenRef {
 const pending = createPendingInput<PendingNewTracker>();
 
 /**
- * Sends the flow's only prompt. Shared by /new, the "➕ Новый трекер" menu button, the quick-nav
- * row and the trackers list -- each leads back somewhere different (home, the trackers list, ...),
- * so `backCallbackData` carries where "← Назад" should go; it defaults to home for callers that
- * have no more specific screen to return to.
+ * Sends the flow's only prompt. Shared by the "➕ Новый трекер" quick-nav button and the trackers
+ * list -- each leads back somewhere different (home, the trackers list, ...), so `backCallbackData`
+ * carries where "← Назад" should go; it defaults to home for callers that have no more specific
+ * screen to return to.
  */
 export async function startNewTrackerFlow(ctx: Context, backCallbackData: string = HOME_CALLBACK_DATA): Promise<void> {
   if (!ctx.from) return;
@@ -29,8 +29,6 @@ export async function startNewTrackerFlow(ctx: Context, backCallbackData: string
 }
 
 export function registerNewHandler(bot: Bot): void {
-  bot.command('new', (ctx) => startNewTrackerFlow(ctx));
-
   bot.on('message:text', async (ctx, next) => {
     if (!ctx.from) return next();
     const state = pending.consume(ctx.from.id);
