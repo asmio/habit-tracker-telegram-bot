@@ -32,13 +32,11 @@ export function clearPendingInput(telegramId: number): void {
 
 /**
  * Clears every pending free-text input for a user as soon as they start any command or press any
- * button, so an abandoned /additem or /edititem (including ones started from the main menu, which
- * enters these flows via a button rather than a command) can never swallow a later, unrelated
- * message. Register this before the handlers that call `createPendingInput`, so a clear always
- * runs before that same update might set a fresh entry.
+ * button, so an abandoned rename/add-item prompt (including ones started from a button rather than
+ * a command) can never swallow a later, unrelated message. Register this before the handlers that
+ * call `createPendingInput`, so a clear always runs before that same update might set a fresh entry.
  *
- * `ui/screen.ts`'s `showScreen`/`rememberScreen` also call `clearPendingInput` directly, which
- * covers `bot.hears` button presses too (the persistent keyboard) -- this middleware stays as
+ * `ui/screen.ts`'s `showScreen` also calls `clearPendingInput` directly -- this middleware stays as
  * belt-and-suspenders for command/callback branches that never touch a screen at all (e.g. an
  * "item not found" toast that only calls `answerCallbackQuery` and returns).
  */

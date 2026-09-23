@@ -1,4 +1,5 @@
 import type { Context } from 'grammy';
+import { logger } from '../../logger';
 import { clearPendingInput } from '../middleware/pending-input';
 import { isMessageNotModified } from './telegram-errors';
 
@@ -14,9 +15,9 @@ type EditMessageTextOptions = NonNullable<Parameters<Context['editMessageText']>
 type InlineKeyboardMarkup = NonNullable<EditMessageTextOptions['reply_markup']>;
 
 /**
- * Explicit "no buttons" for `showScreen`/`rememberScreen`. `editMessageText`'s `reply_markup` is
- * optional at the Bot API level, but *omitting* it leaves the message's existing keyboard alone —
- * it does not clear it. Every caller must pass a keyboard on purpose, this one when it means none.
+ * Explicit "no buttons" for `showScreen`. `editMessageText`'s `reply_markup` is optional at the Bot
+ * API level, but *omitting* it leaves the message's existing keyboard alone — it does not clear it.
+ * Every caller must pass a keyboard on purpose, this one when it means none.
  */
 export const EMPTY_KEYBOARD: InlineKeyboardMarkup = { inline_keyboard: [] };
 
@@ -27,8 +28,12 @@ const screens = new Map<number, ScreenRef>();
  * Renders a top-level screen for a user: edits their previously tracked message in place if one
  * exists and the edit succeeds, otherwise sends a fresh message and starts tracking that instead.
  * This is what makes the bot feel like a single screen instead of a growing chat log — every
- * command, every persistent-keyboard button and every management-menu button should call this
- * (or `rememberScreen`) rather than `ctx.reply` directly.
+ * command and every button should call this rather than `ctx.reply` directly.
+ *
+ * Never pass this the ref of a message that was ever sent with a `ReplyKeyboardMarkup` (including
+ * `remove_keyboard`): Telegram refuses to attach an `InlineKeyboardMarkup` to one via edit ("message
+ * can't be edited"), which silently falls through to a confusing extra fresh message below. Such a
+ * send should stay a one-off, disposable message instead (see timezone.handler.ts's `sendDisposable`).
  *
  * Always clears any pending free-text input first (see `clearPendingInput`): showing a *different*
  * screen means whatever the user was previously asked to type no longer has anywhere to go.
@@ -50,24 +55,20 @@ export async function showScreen(
       if (isMessageNotModified(error)) return tracked;
       // Message deleted, chat gone, or anything else that makes editing impossible: fall through
       // to a fresh send below. A genuinely broken chat (e.g. the bot was blocked) will fail there
-      // too, and that failure is left to propagate to `bot.catch`.
+      // too, and that failure is left to propagate to `bot.catch`. Logged (not silently swallowed):
+      // a message whose reply_markup was ever a ReplyKeyboardMarkup can never be edited into one
+      // with an InlineKeyboardMarkup ("message can't be edited"), which previously fell through to
+      // this same fresh-send path invisibly and looked like a duplicate message.
+      logger.warn('showScreen: edit failed, falling back to a fresh send', {
+        telegramId,
+        tracked,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   const sent = await ctx.reply(text, { reply_markup: replyMarkup });
   const ref: ScreenRef = { chatId: sent.chat.id, messageId: sent.message_id };
-  screens.set(telegramId, ref);
-  return ref;
-}
-
-/**
- * Records a message the caller already sent itself as the new "current screen". For the rare
- * cases that must send a fresh message on purpose — a `ReplyKeyboardMarkup` (the persistent main
- * menu, `force_reply`, a location request) can only ever be attached by sending, never by editing.
- */
-export function rememberScreen(telegramId: number, chatId: number, messageId: number): ScreenRef {
-  clearPendingInput(telegramId);
-  const ref: ScreenRef = { chatId, messageId };
   screens.set(telegramId, ref);
   return ref;
 }

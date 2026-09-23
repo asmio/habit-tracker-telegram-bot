@@ -14,9 +14,10 @@ function homeKeyboard(): InlineKeyboard {
   ]);
 }
 
-/** Renders the home screen: greeting + the 3 primary actions. Shared by /start and the `home:*` buttons. */
-export async function showHomeScreen(ctx: Context, telegramId: number): Promise<void> {
-  await showScreen(ctx, telegramId, GREETING, homeKeyboard());
+/** Renders the home screen: greeting + the 3 primary actions. Shared by /start, the `home:*` buttons and timezone confirmation. */
+export async function showHomeScreen(ctx: Context, telegramId: number, prefix?: string): Promise<void> {
+  const text = prefix ? `${prefix}\n\n${GREETING}` : GREETING;
+  await showScreen(ctx, telegramId, text, homeKeyboard());
 }
 
 export function registerStartHandler(bot: Bot): void {
@@ -25,9 +26,7 @@ export function registerStartHandler(bot: Bot): void {
 
     const user = await trackerService.getOrCreateUser(ctx.from.id);
     if (!user.timezoneConfirmed) {
-      // One message: greeting + zone picker. `MAIN_MENU_KEYBOARD` cannot join it (a message has
-      // one reply_markup, and the picker needs its inline keyboard) -- it appears as soon as the
-      // zone is confirmed instead, which every user reaches through the gate regardless.
+      // One message: greeting + zone picker.
       await promptTimezone(ctx, ctx.from.id, `${GREETING}\n\n${DEFAULT_PROMPT}`);
       return;
     }
