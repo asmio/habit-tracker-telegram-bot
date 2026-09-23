@@ -1,0 +1,1 @@
+ALTER TABLE `trackers` ADD `is_active` integer DEFAULT true NOT NULL;

@@ -40,7 +40,9 @@ export async function showTrackersListScreen(ctx: Context, telegramId: number, p
   const trackerList = await trackerService.getTrackers(telegramId);
   const text = trackerList.length === 0 ? NO_TRACKERS_TEXT : '🗂 Твои трекеры:';
 
-  const rows: Button[][] = trackerList.map((tracker) => [InlineKeyboard.text(tracker.name, `trackers:open:${tracker.id}`)]);
+  const rows: Button[][] = trackerList.map((tracker) => [
+    InlineKeyboard.text(tracker.isActive ? tracker.name : `⏸ ${tracker.name}`, `trackers:open:${tracker.id}`),
+  ]);
   rows.push([InlineKeyboard.text('➕ Новый трекер', 'trackers:new')]);
   rows.push([backButton(HOME_CALLBACK_DATA)]);
 
@@ -50,13 +52,19 @@ export async function showTrackersListScreen(ctx: Context, telegramId: number, p
 async function showTrackerScreen(ctx: Context, telegramId: number, trackerId: number, prefix?: string): Promise<void> {
   const tracker = await trackerService.getTracker(telegramId, trackerId);
   const items = await trackerService.getItems(telegramId, trackerId);
-  const text = `📋 ${tracker.name}` + (items.length === 0 ? '\n\nПунктов пока нет.' : '');
+  const text =
+    `📋 ${tracker.name}` +
+    (tracker.isActive ? '' : ' | Отключён') +
+    (items.length === 0 ? '\n\nПунктов пока нет.' : '');
 
   const rows: Button[][] = items.map((item) => [InlineKeyboard.text(item.label, `trackers:item:${item.id}`)]);
   rows.push([InlineKeyboard.text('➕ Добавить пункт', `trackers:additem:${tracker.id}`)]);
-  rows.push([InlineKeyboard.text('🔀 Изменить порядок', `trackers:sort:${tracker.id}`)]);
   rows.push([
     InlineKeyboard.text('✏️ Переименовать', `trackers:renametracker:${tracker.id}`),
+    InlineKeyboard.text('🔀 Изменить порядок', `trackers:sort:${tracker.id}`)
+  ]);
+  rows.push([
+    InlineKeyboard.text(tracker.isActive ? '⏸ Отключить' : '▶️ Включить', `trackers:toggleactive:${tracker.id}`),
     InlineKeyboard.text('🗑 Удалить', `trackers:deltracker:${tracker.id}`),
   ]);
   rows.push([backButton('trackers:list'), InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]);
@@ -162,6 +170,24 @@ export function registerTrackersHandler(bot: Bot): void {
       logger.warn('Item screen request for an item the user does not own', { telegramId: ctx.from.id, itemId });
       await showTrackersListScreen(ctx, ctx.from.id, '⚠️ Пункт не найден.');
     }
+  });
+
+  bot.callbackQuery(/^trackers:toggleactive:(\d+)$/, async (ctx) => {
+    const trackerId = Number(ctx.match[1]);
+
+    let tracker: Tracker;
+    try {
+      tracker = await trackerService.getTracker(ctx.from.id, trackerId);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      logger.warn('Toggle-active request for a tracker the user does not own', { telegramId: ctx.from.id, trackerId });
+      await ctx.answerCallbackQuery({ text: 'Трекер не найден.' });
+      return;
+    }
+
+    await trackerService.setTrackerActive(ctx.from.id, trackerId, !tracker.isActive);
+    await ctx.answerCallbackQuery();
+    await showTrackerScreen(ctx, ctx.from.id, trackerId);
   });
 
   bot.callbackQuery(/^trackers:renametracker:(\d+)$/, async (ctx) => {

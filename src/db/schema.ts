@@ -19,6 +19,8 @@ export const trackers = sqliteTable('trackers', {
     .notNull()
     .references(() => users.telegramId, { onDelete: 'cascade' }),
   name: text('name').notNull(),
+  /** False = paused: hidden from "Сегодня", items and history stay untouched. */
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
   createdAt: createdAt(),
 });
 

@@ -96,6 +96,15 @@ export class TrackerService {
       .orderBy(asc(trackers.id));
   }
 
+  /** Same as `getTrackers`, but skips paused ones -- for screens that show only what to act on today. */
+  async getActiveTrackers(telegramId: number): Promise<Tracker[]> {
+    return await this.db
+      .select()
+      .from(trackers)
+      .where(and(eq(trackers.telegramId, telegramId), eq(trackers.isActive, true)))
+      .orderBy(asc(trackers.id));
+  }
+
   async getTracker(telegramId: number, trackerId: number): Promise<Tracker> {
     const [tracker] = await this.db
       .select()
@@ -159,6 +168,12 @@ export class TrackerService {
   async updateTrackerName(telegramId: number, trackerId: number, name: string): Promise<Tracker> {
     await this.getTracker(telegramId, trackerId);
     const [tracker] = await this.db.update(trackers).set({ name }).where(eq(trackers.id, trackerId)).returning();
+    return tracker;
+  }
+
+  async setTrackerActive(telegramId: number, trackerId: number, isActive: boolean): Promise<Tracker> {
+    await this.getTracker(telegramId, trackerId);
+    const [tracker] = await this.db.update(trackers).set({ isActive }).where(eq(trackers.id, trackerId)).returning();
     return tracker;
   }
 

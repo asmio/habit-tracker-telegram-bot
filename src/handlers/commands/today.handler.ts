@@ -13,7 +13,7 @@ const HEADER_CALLBACK_DATA = 'today-header';
  * callback.handler.ts's post-toggle redraw get it for free.
  */
 export async function buildTodayKeyboard(telegramId: number, date: string): Promise<InlineKeyboard> {
-  const trackers = await trackerService.getTrackers(telegramId);
+  const trackers = await trackerService.getActiveTrackers(telegramId);
   const rows: ReturnType<typeof InlineKeyboard.text>[][] = [];
 
   for (const tracker of trackers) {
@@ -32,7 +32,7 @@ export async function buildTodayKeyboard(telegramId: number, date: string): Prom
 /** Renders the single combined "today" screen for a user. Shared by the home screen and callback.handler.ts. */
 export async function renderTodayScreen(ctx: Context, telegramId: number): Promise<void> {
   const user = await trackerService.getOrCreateUser(telegramId);
-  const trackers = await trackerService.getTrackers(telegramId);
+  const trackers = await trackerService.getActiveTrackers(telegramId);
   if (trackers.length === 0) {
     await showScreen(
       ctx,
