@@ -19,7 +19,6 @@ export const trackers = sqliteTable('trackers', {
     .notNull()
     .references(() => users.telegramId, { onDelete: 'cascade' }),
   name: text('name').notNull(),
-  description: text('description'),
   createdAt: createdAt(),
 });
 

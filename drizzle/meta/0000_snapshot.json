@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a4216a92-7754-445e-a18d-76cce1d8c131",
+  "id": "be89e8bd-6f5d-411d-8652-efee26eb1841",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "daily_logs": {
@@ -158,13 +158,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

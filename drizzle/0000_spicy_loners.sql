@@ -22,7 +22,6 @@ CREATE TABLE `trackers` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`telegram_id` integer NOT NULL,
 	`name` text NOT NULL,
-	`description` text,
 	`created_at` text DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
 	FOREIGN KEY (`telegram_id`) REFERENCES `users`(`telegram_id`) ON UPDATE no action ON DELETE cascade
 );
