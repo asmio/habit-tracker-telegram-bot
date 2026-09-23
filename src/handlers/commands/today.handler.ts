@@ -17,14 +17,22 @@ const TODAY_SCREEN = 'home:today';
  */
 export async function buildTodayKeyboard(telegramId: number, date: string): Promise<InlineKeyboard> {
   const trackers = await trackerService.getActiveTrackers(telegramId);
-  const rows: ReturnType<typeof InlineKeyboard.text>[][] = [];
-
+  const logs = [];
   for (const tracker of trackers) {
-    const items = await trackerService.getDayLog(telegramId, tracker.id, date);
+    logs.push({ tracker, items: await trackerService.getDayLog(telegramId, tracker.id, date) });
+  }
+
+  // One width for the whole screen, so the checkboxes line up across trackers too.
+  const labelWidth = Math.max(0, ...logs.flatMap(({ items }) => items.map((item) => [...item.label].length)));
+
+  const rows: ReturnType<typeof InlineKeyboard.text>[][] = [];
+  for (const { tracker, items } of logs) {
     const header = items.length === 0 ? `── 📋 ${tracker.name} — нет пунктов ──` : `── 📋 ${tracker.name} ──`;
     rows.push([InlineKeyboard.text(header, HEADER_CALLBACK_DATA)]);
     for (const item of items) {
-      rows.push([InlineKeyboard.text(toggleButtonText(item.label, item.checked), toggleCallbackData(item.id, date))]);
+      rows.push([
+        InlineKeyboard.text(toggleButtonText(item.label, item.checked, labelWidth), toggleCallbackData(item.id, date)),
+      ]);
     }
   }
   rows.push([InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]);
