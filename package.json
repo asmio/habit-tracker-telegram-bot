@@ -12,9 +12,11 @@
   },
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
@@ -32,10 +34,13 @@
   "devDependencies": {
     "@flydotio/dockerfile": "^0.7.10",
     "@types/better-sqlite3": "^9.6.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.13.6",
     "@types/tz-lookup": "^6.1.2",
     "drizzle-kit": "^0.31.11",
+    "jest": "^30.5.2",
     "nodemon": "^3.1.14",
+    "ts-jest": "^29.4.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
