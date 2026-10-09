@@ -2,6 +2,7 @@ import { Bot } from 'grammy';
 import { registerCallbackHandler } from './commands/callback.handler';
 import { registerMenuHandler } from './commands/menu.handler';
 import { registerNewHandler } from './commands/new.handler';
+import { registerReminderHandler } from './commands/reminder.handler';
 import { registerStartHandler } from './commands/start.handler';
 import { registerTimezoneHandler } from './commands/timezone.handler';
 import { registerTrackersHandler } from './commands/trackers.handler';
@@ -19,4 +20,5 @@ export function registerHandlers(bot: Bot): void {
   registerNewHandler(bot);
   registerTrackersHandler(bot);
   registerCallbackHandler(bot);
+  registerReminderHandler(bot);
 }

@@ -23,10 +23,12 @@ export async function buildTodayKeyboard(telegramId: number, date: string): Prom
 
   const rows: InlineKeyboardButton[][] = [];
   for (const { tracker, items } of logs) {
-    const header = items.length === 0 ? `── 📋 ${tracker.name} — нет пунктов ──` : `── 📋 ${tracker.name} ──`;
+    const header = items.length === 0 ? `📋 ${tracker.name} — нет пунктов` : `📋 ${tracker.name}`;
     rows.push([disabledButton(header)]);
     for (const item of items) {
-      rows.push([InlineKeyboard.text(toggleButtonLabel(item.label, item.checked), toggleCallbackData(item.id, date))]);
+      // A trailing bell + time marks an item that has a reminder set.
+      const label = item.reminderTime ? `${item.label} 🔔 ${item.reminderTime}` : item.label;
+      rows.push([InlineKeyboard.text(toggleButtonLabel(label, item.checked), toggleCallbackData(item.id, date))]);
     }
   }
   rows.push([InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]);

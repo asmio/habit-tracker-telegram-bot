@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, gt, lt, sql } from 'drizzle-orm';
 import { db, type Db } from '../db';
 import {
   dailyLogs,
+  reminders,
   trackerItems,
   trackers,
   users,
@@ -12,8 +13,23 @@ import {
 import { NotFoundError } from './errors';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const REMINDER_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-type DayLogItem = TrackerItem & { checked: boolean };
+/** An item, plus its reminder time if it has one set -- `null` otherwise. What every item-reading method returns. */
+type ItemWithReminder = TrackerItem & { reminderTime: string | null };
+type DayLogItem = ItemWithReminder & { checked: boolean };
+
+/** An item with a reminder set, on an active tracker, plus what the scheduler needs to decide whether it's due. */
+export interface ReminderCandidate {
+  itemId: number;
+  itemLabel: string;
+  trackerId: number;
+  trackerName: string;
+  telegramId: number;
+  /** `HH:MM` in `timezone`. */
+  reminderTime: string;
+  timezone: string;
+}
 
 /**
  * True for IANA zone names such as `Europe/Minsk`. UTC offsets like `+03:00` are
@@ -133,11 +149,12 @@ export class TrackerService {
   }
 
   /** Ownership-checked lookup of a single item. */
-  async getItem(telegramId: number, itemId: number): Promise<TrackerItem> {
+  async getItem(telegramId: number, itemId: number): Promise<ItemWithReminder> {
     const [item] = await this.db
-      .select(getTableColumns(trackerItems))
+      .select({ ...getTableColumns(trackerItems), reminderTime: reminders.time })
       .from(trackerItems)
       .innerJoin(trackers, eq(trackers.id, trackerItems.trackerId))
+      .leftJoin(reminders, eq(reminders.itemId, trackerItems.id))
       .where(and(eq(trackerItems.id, itemId), eq(trackers.telegramId, telegramId)));
     if (!item) {
       throw new NotFoundError(`Item ${itemId} not found`);
@@ -146,11 +163,12 @@ export class TrackerService {
   }
 
   /** Items of the tracker, in order, without any daily_logs state. */
-  async getItems(telegramId: number, trackerId: number): Promise<TrackerItem[]> {
+  async getItems(telegramId: number, trackerId: number): Promise<ItemWithReminder[]> {
     await this.getTracker(telegramId, trackerId);
     return await this.db
-      .select()
+      .select({ ...getTableColumns(trackerItems), reminderTime: reminders.time })
       .from(trackerItems)
+      .leftJoin(reminders, eq(reminders.itemId, trackerItems.id))
       .where(eq(trackerItems.trackerId, trackerId))
       .orderBy(asc(trackerItems.order), asc(trackerItems.id));
   }
@@ -163,6 +181,33 @@ export class TrackerService {
       .where(eq(trackerItems.id, itemId))
       .returning();
     return item;
+  }
+
+  /** `reminderTime` is `HH:MM` in the item's owner's time zone, or `null` to remove the reminder. */
+  async setReminderTime(telegramId: number, itemId: number, reminderTime: string | null): Promise<void> {
+    if (reminderTime !== null && !REMINDER_TIME_PATTERN.test(reminderTime)) {
+      throw new Error(`Invalid reminder time "${reminderTime}", expected HH:MM`);
+    }
+    await this.getItem(telegramId, itemId); // ownership check
+
+    if (reminderTime === null) {
+      await this.db.delete(reminders).where(eq(reminders.itemId, itemId));
+      return;
+    }
+
+    // A fresh reminder starts with no "already sent" marker. An existing one keeps its marker only
+    // if the time didn't actually change -- a real reschedule should still be able to fire today
+    // even if the old time already did (see `hasReminderLog`/`recordReminderSent`).
+    await this.db
+      .insert(reminders)
+      .values({ itemId, time: reminderTime, lastSentDate: null })
+      .onConflictDoUpdate({
+        target: reminders.itemId,
+        set: {
+          time: reminderTime,
+          lastSentDate: sql`CASE WHEN ${reminders.time} = ${reminderTime} THEN ${reminders.lastSentDate} ELSE NULL END`,
+        },
+      });
   }
 
   async updateTrackerName(telegramId: number, trackerId: number, name: string): Promise<Tracker> {
@@ -295,14 +340,64 @@ export class TrackerService {
 
   private async queryDayLog(trackerId: number, date: string): Promise<DayLogItem[]> {
     const rows = await this.db
-      .select({ ...getTableColumns(trackerItems), checked: dailyLogs.checked })
+      .select({ ...getTableColumns(trackerItems), checked: dailyLogs.checked, reminderTime: reminders.time })
       .from(trackerItems)
       .leftJoin(dailyLogs, and(eq(dailyLogs.itemId, trackerItems.id), eq(dailyLogs.date, date)))
+      .leftJoin(reminders, eq(reminders.itemId, trackerItems.id))
       .where(eq(trackerItems.trackerId, trackerId))
       .orderBy(asc(trackerItems.order), asc(trackerItems.id));
 
     // No log row for the day means the item has not been checked.
     return rows.map((row) => ({ ...row, checked: row.checked ?? false }));
+  }
+
+  /**
+   * Every item with a reminder set, on a tracker that isn't paused -- the scheduler's own source of
+   * truth for what might be due, re-read fresh on every tick rather than cached, since items, their
+   * reminder times, and tracker pause state can all change between ticks.
+   */
+  async getReminderCandidates(): Promise<ReminderCandidate[]> {
+    return await this.db
+      .select({
+        itemId: trackerItems.id,
+        itemLabel: trackerItems.label,
+        trackerId: trackers.id,
+        trackerName: trackers.name,
+        telegramId: trackers.telegramId,
+        reminderTime: reminders.time,
+        timezone: users.timezone,
+      })
+      .from(reminders)
+      .innerJoin(trackerItems, eq(trackerItems.id, reminders.itemId))
+      .innerJoin(trackers, eq(trackers.id, trackerItems.trackerId))
+      .innerJoin(users, eq(users.telegramId, trackers.telegramId))
+      .where(eq(trackers.isActive, true));
+  }
+
+  /** Whether a reminder was already sent for this item on this day (see `recordReminderSent`). */
+  async hasReminderLog(itemId: number, date: string): Promise<boolean> {
+    assertDate(date);
+    const [row] = await this.db
+      .select({ lastSentDate: reminders.lastSentDate })
+      .from(reminders)
+      .where(eq(reminders.itemId, itemId));
+    return row?.lastSentDate === date;
+  }
+
+  /** Whether the item is already checked for this day -- a reminder for it would be pointless. */
+  async isItemChecked(itemId: number, date: string): Promise<boolean> {
+    assertDate(date);
+    const [row] = await this.db
+      .select({ checked: dailyLogs.checked })
+      .from(dailyLogs)
+      .where(and(eq(dailyLogs.itemId, itemId), eq(dailyLogs.date, date)));
+    return row?.checked ?? false;
+  }
+
+  /** Marks the reminder as sent, so `hasReminderLog` skips it for the rest of the day. */
+  async recordReminderSent(itemId: number, date: string): Promise<void> {
+    assertDate(date);
+    await this.db.update(reminders).set({ lastSentDate: date }).where(eq(reminders.itemId, itemId));
   }
 }
 

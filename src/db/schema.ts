@@ -67,6 +67,45 @@ export const dailyLogs = sqliteTable(
   ],
 );
 
+/**
+ * A reminder is a separate, optional concept bolted onto an item, not a property of it: an item
+ * either has one (a row here) or doesn't (no row) -- `itemId` is this table's own primary key,
+ * not just a foreign key, which is what makes "has a reminder" a row's existence rather than a
+ * nullable sentinel column. Keeping it out of `tracker_items` also means this table (and only this
+ * one) pays for any future reminder schema churn -- `tracker_items` no longer needs a CHECK
+ * constraint at all, so plain `ADD COLUMN`s to it stay simple ALTERs instead of SQLite's
+ * rebuild-the-whole-table dance that a CHECK constraint forces.
+ */
+export const reminders = sqliteTable(
+  'reminders',
+  {
+    itemId: integer('item_id')
+      .primaryKey()
+      .references(() => trackerItems.id, { onDelete: 'cascade' }),
+    /** `HH:MM` in the owner's time zone to send the daily reminder at. */
+    time: text('time').notNull(),
+    /**
+     * Calendar day (`YYYY-MM-DD`, owner's time zone) this reminder last actually fired -- at most
+     * one reminder per item per day, so this one column is all the "already sent today?" state
+     * needs. `TrackerService.setReminderTime` nulls it out whenever `time` actually changes, so a
+     * reschedule later the same day can still fire instead of being blocked by it.
+     */
+    lastSentDate: text('last_sent_date'),
+  },
+  (table) => [
+    // GLOB (not a check against a single pattern) because SQLite has no regex alternation: an
+    // `HH` of 00-19 is any digit in the second place, but 20-23 only allows 0-3.
+    check(
+      'reminders_time_is_hh_mm',
+      sql`${table.time} GLOB '[0-1][0-9]:[0-5][0-9]' OR ${table.time} GLOB '2[0-3]:[0-5][0-9]'`,
+    ),
+    check(
+      'reminders_last_sent_date_is_iso_date',
+      sql`${table.lastSentDate} IS NULL OR date(${table.lastSentDate}) IS ${table.lastSentDate}`,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Tracker = typeof trackers.$inferSelect;
 export type TrackerItem = typeof trackerItems.$inferSelect;

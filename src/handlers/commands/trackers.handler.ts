@@ -13,6 +13,8 @@ import { backButton, confirmKeyboard } from '../ui/tracker-picker';
 
 const MAX_LENGTH = 64;
 const NO_TRACKERS_TEXT = 'Трекеров пока нет.';
+const REMINDER_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const REMINDER_PROMPT_TEXT = 'Введи время напоминания в формате ЧЧ:ММ, например 09:00:';
 
 const SORT_MOVE_PATTERN = /^trackers:sortmove:(\d+):(up|down)$/;
 
@@ -26,44 +28,67 @@ function addItemText(trackerName: string): string {
   return `Введи название нового пункта для трекера «${trackerName}»:`;
 }
 
+/** Shared by every "name"-shaped prompt (tracker/item rename, new item): any non-empty string up to `MAX_LENGTH`. */
+function validateName(value: string): string | undefined {
+  if (value.length === 0) return 'Название не может быть пустым.';
+  if (value.length > MAX_LENGTH) return `Слишком длинное название (максимум ${MAX_LENGTH} символов).`;
+  return undefined;
+}
+
+function validateReminderTime(value: string): string | undefined {
+  return REMINDER_TIME_PATTERN.test(value) ? undefined : 'Неверный формат. Нужно ЧЧ:ММ, например 09:00.';
+}
+
 /**
- * The three prompts of this file ask for typed text. As in new.handler.ts, the wait *is* the route
+ * The four prompts of this file ask for typed text. As in new.handler.ts, the wait *is* the route
  * stored in the user's session (`trackers:renametracker:5`, ...): it survives a restart and ends by
  * itself when any other screen is shown, and everything else a prompt needs is re-read from the
  * database by the id in that route.
  */
-const PROMPT_ROUTE = /^trackers:(renametracker|renameitem|additem):(\d+)$/;
+const PROMPT_ROUTE = /^trackers:(renametracker|renameitem|additem|setreminder):(\d+)$/;
 
-type PromptKind = 'renametracker' | 'renameitem' | 'additem';
+type PromptKind = 'renametracker' | 'renameitem' | 'additem' | 'setreminder';
 
 interface Prompt {
-  trackerId: number;
   text: string;
   backCallbackData: string;
+  validate: (value: string) => string | undefined;
   save: (value: string) => Promise<unknown>;
+  /** Renders whatever screen the user lands on once `save` succeeds. */
+  showResult: (ctx: Context, telegramId: number) => Promise<void>;
 }
 
 /** Throws `NotFoundError` if the tracker/item is gone, or is not the user's. */
 async function loadPrompt(telegramId: number, kind: PromptKind, id: number): Promise<Prompt> {
-  if (kind === 'renameitem') {
+  if (kind === 'renameitem' || kind === 'setreminder') {
     const item = await trackerService.getItem(telegramId, id);
-    return {
-      trackerId: item.trackerId,
-      text: renameText(item.label),
-      backCallbackData: `trackers:item:${item.id}`,
-      save: (label) => trackerService.updateItemLabel(telegramId, item.id, label),
-    };
+    return kind === 'renameitem'
+      ? {
+          text: renameText(item.label),
+          backCallbackData: `trackers:item:${item.id}`,
+          validate: validateName,
+          save: (label) => trackerService.updateItemLabel(telegramId, item.id, label),
+          showResult: (ctx, tid) => showItemScreen(ctx, tid, item.id),
+        }
+      : {
+          text: REMINDER_PROMPT_TEXT,
+          backCallbackData: `trackers:item:${item.id}`,
+          validate: validateReminderTime,
+          save: (time) => trackerService.setReminderTime(telegramId, item.id, time),
+          showResult: (ctx, tid) => showItemScreen(ctx, tid, item.id),
+        };
   }
 
   const tracker = await trackerService.getTracker(telegramId, id);
   return {
-    trackerId: tracker.id,
     text: kind === 'renametracker' ? renameText(tracker.name) : addItemText(tracker.name),
     backCallbackData: `trackers:open:${tracker.id}`,
+    validate: validateName,
     save:
       kind === 'renametracker'
         ? (name) => trackerService.updateTrackerName(telegramId, tracker.id, name)
         : (label) => trackerService.createItem(telegramId, tracker.id, label),
+    showResult: (ctx, tid) => showTrackerScreen(ctx, tid, tracker.id),
   };
 }
 
@@ -89,7 +114,9 @@ async function showTrackerScreen(ctx: Context, telegramId: number, trackerId: nu
     (tracker.isActive ? '' : ' | Отключён') +
     (items.length === 0 ? '\n\nПунктов пока нет.' : '');
 
-  const rows: Button[][] = items.map((item) => [InlineKeyboard.text(item.label, `trackers:item:${item.id}`)]);
+  const rows: Button[][] = items.map((item) => [
+    InlineKeyboard.text(item.reminderTime ? `${item.label} 🔔` : item.label, `trackers:item:${item.id}`),
+  ]);
   rows.push([InlineKeyboard.text('➕ Добавить пункт', `trackers:additem:${tracker.id}`)]);
   rows.push([
     InlineKeyboard.text('✏️ Переименовать', `trackers:renametracker:${tracker.id}`),
@@ -129,7 +156,17 @@ async function showTrackerSortScreen(ctx: Context, telegramId: number, trackerId
 
 async function showItemScreen(ctx: Context, telegramId: number, itemId: number): Promise<void> {
   const item = await trackerService.getItem(telegramId, itemId);
+
+  const reminderRow: Button[] = [
+    InlineKeyboard.text(
+      item.reminderTime ? `🔔 ${item.reminderTime} ✏️` : '🔔 Добавить напоминание',
+      `trackers:setreminder:${item.id}`,
+    ),
+  ];
+  if (item.reminderTime) reminderRow.push(InlineKeyboard.text('🔕 Убрать', `trackers:delreminder:${item.id}`));
+
   const rows: Button[][] = [
+    reminderRow,
     [
       InlineKeyboard.text('✏️ Переименовать', `trackers:renameitem:${item.id}`),
       InlineKeyboard.text('🗑 Удалить', `trackers:delitem:${item.id}`),
@@ -294,6 +331,45 @@ export function registerTrackersHandler(bot: Bot): void {
     );
   });
 
+  bot.callbackQuery(/^trackers:setreminder:(\d+)$/, async (ctx) => {
+    const itemId = Number(ctx.match[1]);
+
+    let item: TrackerItem;
+    try {
+      item = await trackerService.getItem(ctx.from.id, itemId);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      logger.warn('Set-reminder request for an item the user does not own', { telegramId: ctx.from.id, itemId });
+      await ctx.answerCallbackQuery({ text: 'Пункт не найден.' });
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+    await showScreen(
+      ctx,
+      ctx.from.id,
+      `trackers:setreminder:${item.id}`,
+      REMINDER_PROMPT_TEXT,
+      InlineKeyboard.from([[backButton(`trackers:item:${item.id}`)]]),
+    );
+  });
+
+  bot.callbackQuery(/^trackers:delreminder:(\d+)$/, async (ctx) => {
+    const itemId = Number(ctx.match[1]);
+
+    try {
+      await trackerService.setReminderTime(ctx.from.id, itemId, null);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      logger.warn('Remove-reminder request for an item the user does not own', { telegramId: ctx.from.id, itemId });
+      await ctx.answerCallbackQuery({ text: 'Пункт не найден.' });
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+    await showItemScreen(ctx, ctx.from.id, itemId);
+  });
+
   bot.callbackQuery(/^trackers:deltracker:(\d+)$/, async (ctx) => {
     const trackerId = Number(ctx.match[1]);
 
@@ -391,14 +467,14 @@ export function registerTrackersHandler(bot: Bot): void {
     }
 
     const text = ctx.msg.text.trim();
-    if (text.length === 0 || text.length > MAX_LENGTH) {
-      const reason = text.length === 0 ? 'Название не может быть пустым.' : `Слишком длинное название (максимум ${MAX_LENGTH} символов).`;
+    const validationError = prompt.validate(text);
+    if (validationError) {
       // Same screen again, so the bot keeps waiting: let the user retry on the same message.
       await showScreen(
         ctx,
         ctx.from.id,
         session.screen,
-        `⚠️ ${reason}\n\n${prompt.text}`,
+        `⚠️ ${validationError}\n\n${prompt.text}`,
         InlineKeyboard.from([[backButton(prompt.backCallbackData)]]),
       );
       return;
@@ -406,7 +482,7 @@ export function registerTrackersHandler(bot: Bot): void {
 
     try {
       await prompt.save(text);
-      await showTrackerScreen(ctx, ctx.from.id, prompt.trackerId);
+      await prompt.showResult(ctx, ctx.from.id);
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
       await showTrackersListScreen(ctx, ctx.from.id, '⚠️ Трекер не найден.');
