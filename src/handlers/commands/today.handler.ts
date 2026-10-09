@@ -4,7 +4,7 @@ import { todayDate, trackerService } from '../../services/tracker.service';
 import { disabledButton } from '../ui/disabled-button';
 import { HOME_CALLBACK_DATA } from '../ui/nav';
 import { showScreen } from '../ui/screen';
-import { toggleButtonText, toggleCallbackData } from '../ui/toggle-button';
+import { toggleButtonLabel, toggleCallbackData } from '../ui/toggle-button';
 
 /** The `callback_data` of the home screen's button that opens this screen. */
 const TODAY_SCREEN = 'home:today';
@@ -21,17 +21,12 @@ export async function buildTodayKeyboard(telegramId: number, date: string): Prom
     logs.push({ tracker, items: await trackerService.getDayLog(telegramId, tracker.id, date) });
   }
 
-  // One width for the whole screen, so the checkboxes line up across trackers too.
-  const labelWidth = Math.max(0, ...logs.flatMap(({ items }) => items.map((item) => [...item.label].length)));
-
   const rows: InlineKeyboardButton[][] = [];
   for (const { tracker, items } of logs) {
     const header = items.length === 0 ? `── 📋 ${tracker.name} — нет пунктов ──` : `── 📋 ${tracker.name} ──`;
     rows.push([disabledButton(header)]);
     for (const item of items) {
-      rows.push([
-        InlineKeyboard.text(toggleButtonText(item.label, item.checked, labelWidth), toggleCallbackData(item.id, date)),
-      ]);
+      rows.push([InlineKeyboard.text(toggleButtonLabel(item.label, item.checked), toggleCallbackData(item.id, date))]);
     }
   }
   rows.push([InlineKeyboard.text('🏠 Домой', HOME_CALLBACK_DATA)]);

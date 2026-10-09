@@ -3,7 +3,7 @@ import { logger } from '../../logger';
 import { NotFoundError } from '../../services/errors';
 import { trackerService } from '../../services/tracker.service';
 import { isMessageNotModified } from '../ui/telegram-errors';
-import { isCheckedButtonText, TOGGLE_CALLBACK_PATTERN } from '../ui/toggle-button';
+import { isCheckedButton, TOGGLE_CALLBACK_PATTERN } from '../ui/toggle-button';
 import { buildTodayKeyboard, renderTodayScreen } from './today.handler';
 
 export function registerCallbackHandler(bot: Bot): void {
@@ -21,9 +21,9 @@ export function registerCallbackHandler(bot: Bot): void {
       return;
     }
 
-    // The button shows what the user sees, and that is what they want to change (☐ → check, ☑ → uncheck),
-    // even if this message is out of date and the database says otherwise.
-    const checked = !isCheckedButtonText(pressed.text);
+    // The button shows what the user sees, and that is what they want to change (plain → check,
+    // green → uncheck), even if this message is out of date and the database says otherwise.
+    const checked = !isCheckedButton(pressed);
 
     try {
       await trackerService.setItemChecked(ctx.from.id, itemId, date, checked);
